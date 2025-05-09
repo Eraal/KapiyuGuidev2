@@ -1,0 +1,456 @@
+{% extends "student/student_base.html" %} {% block title %}View Inquiry -
+KapiyuGuide{% endblock %} {% block extra_head %}
+<style>
+  .message-bubble {
+    position: relative;
+    max-width: 80%;
+    margin-bottom: 1rem;
+  }
+
+  .message-bubble::after {
+    content: "";
+    position: absolute;
+    bottom: 10px;
+    width: 0;
+    height: 0;
+    border: 8px solid transparent;
+  }
+
+  .message-sent {
+    margin-left: auto;
+    background-color: #dbeafe;
+    border-radius: 18px 18px 4px 18px;
+  }
+
+  .message-sent::after {
+    right: -15px;
+    border-left-color: #dbeafe;
+  }
+
+  .message-received {
+    margin-right: auto;
+    background-color: #f3f4f6;
+    border-radius: 18px 18px 18px 4px;
+  }
+
+  .message-received::after {
+    left: -15px;
+    border-right-color: #f3f4f6;
+  }
+
+  .attachment-preview {
+    max-width: 100px;
+    max-height: 100px;
+    border-radius: 4px;
+  }
+
+  .inquiry-status-pending {
+    background-color: #fef3c7;
+    color: #92400e;
+  }
+
+  .inquiry-status-in_progress {
+    background-color: #dbeafe;
+    color: #1e40af;
+  }
+
+  .inquiry-status-resolved {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+
+  .inquiry-status-reopened {
+    background-color: #ede9fe;
+    color: #5b21b6;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="container mx-auto" data-inquiry-id="{{ inquiry.id }}">
+  <!-- Breadcrumb Navigation -->
+  <div class="flex items-center text-sm text-gray-600 mb-4">
+    <a href="{{ url_for('student.dashboard') }}" class="hover:text-blue-600"
+      >Dashboard</a
+    >
+    <i class="fas fa-chevron-right mx-2 text-xs"></i>
+    <a href="{{ url_for('student.inquiries') }}" class="hover:text-blue-600"
+      >Inquiries</a
+    >
+    <i class="fas fa-chevron-right mx-2 text-xs"></i>
+    <span class="text-gray-800 font-medium">{{ inquiry.subject }}</span>
+  </div>
+
+  <!-- Main Content Grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+    <!-- Left Column - Inquiry Details -->
+    <div class="lg:col-span-1">
+      <div class="bg-white rounded-xl shadow-sm mb-6">
+        <div class="px-6 py-4 border-b">
+          <h2 class="text-lg font-bold text-gray-800">Inquiry Details</h2>
+        </div>
+        <div class="p-6">
+          <dl class="space-y-4">
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Subject</dt>
+              <dd class="mt-1 text-sm text-gray-900">{{ inquiry.subject }}</dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Office</dt>
+              <dd class="mt-1 text-sm text-gray-900">
+                {{ inquiry.office.name }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Status</dt>
+              <dd class="mt-1">
+                <span
+                  class="px-2 py-1 text-xs rounded-full inquiry-status-{{ inquiry.status }}"
+                >
+                  {{ inquiry.status|replace('_', ' ')|title }}
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Date Submitted</dt>
+              <dd class="mt-1 text-sm text-gray-900">
+                {{ inquiry.created_at.strftime('%B %d, %Y') }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Concern Types</dt>
+              <dd class="mt-1 text-sm">
+                {% if inquiry.concerns %}
+                <ul class="space-y-1">
+                  {% for concern in inquiry.concerns %}
+                  <li class="text-gray-900">
+                    {{ concern.concern_type.name }} {% if
+                    concern.other_specification %}
+                    <span class="text-gray-500 italic"
+                      >({{ concern.other_specification }})</span
+                    >
+                    {% endif %}
+                  </li>
+                  {% endfor %}
+                </ul>
+                {% else %}
+                <span class="text-gray-500">No specific concerns listed</span>
+                {% endif %}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      <!-- Related Inquiries -->
+      {% if related_inquiries %}
+      <div class="bg-white rounded-xl shadow-sm">
+        <div class="px-6 py-4 border-b">
+          <h2 class="text-lg font-bold text-gray-800">Related Inquiries</h2>
+        </div>
+        <div class="p-6">
+          <ul class="space-y-4">
+            {% for related in related_inquiries %}
+            <li>
+              <a
+                href="{{ url_for('student.view_inquiry', inquiry_id=related.id) }}"
+                class="block hover:bg-gray-50 p-3 rounded-md transition"
+              >
+                <p class="text-sm font-medium text-blue-600 truncate">
+                  {{ related.subject }}
+                </p>
+                <p class="text-xs text-gray-500 mt-1">
+                  {{ related.created_at.strftime('%b %d, %Y') }}
+                </p>
+                <span
+                  class="mt-2 inline-block px-2 py-0.5 text-xs rounded-full inquiry-status-{{ related.status }}"
+                >
+                  {{ related.status|replace('_', ' ')|title }}
+                </span>
+              </a>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Right Column - Messages -->
+    <div class="lg:col-span-3">
+      <div class="bg-white rounded-xl shadow-sm">
+        <div class="px-6 py-4 border-b flex items-center justify-between">
+          <h2 class="text-lg font-bold text-gray-800">Conversation</h2>
+          <a
+            href="{{ url_for('student.inquiries') }}"
+            class="text-blue-600 hover:text-blue-800 text-sm flex items-center"
+          >
+            <i class="fas fa-arrow-left mr-1"></i> Back to Inquiries
+          </a>
+        </div>
+        <div class="p-6">
+          <!-- Messages History -->
+          <div
+            class="space-y-6 mb-6 max-h-[500px] overflow-y-auto"
+            id="messageHistory"
+          >
+            {% for message in messages %}
+            <div
+              class="flex {% if message.sender_id == current_user.id %}justify-end{% endif %}"
+            >
+              <div
+                class="message-bubble p-4 {% if message.sender_id == current_user.id %}message-sent{% else %}message-received{% endif %}"
+                data-message-id="{{ message.id }}"
+                data-sender-id="{{ message.sender_id }}"
+              >
+                <div class="flex items-center mb-2">
+                  {% if message.sender_id != current_user.id %}
+                  <div
+                    class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white"
+                  >
+                    {{ message.sender.first_name[0] }}{{
+                    message.sender.last_name[0] }}
+                  </div>
+                  <div class="ml-2">
+                    <div class="text-xs font-semibold">
+                      {{ message.sender.get_full_name() }} {% if
+                      message.sender.role == 'office_admin' %}
+                      <span class="text-blue-600">(Office Staff)</span>
+                      {% endif %}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                      {{ message.created_at.strftime('%b %d, %Y %I:%M %p') }}
+                    </div>
+                  </div>
+                  {% else %}
+                  <div class="text-right ml-auto">
+                    <div class="text-xs font-semibold">You</div>
+                    <div class="text-xs text-gray-500">
+                      {{ message.created_at.strftime('%b %d, %Y %I:%M %p') }}
+                    </div>
+                  </div>
+                  <div
+                    class="h-8 w-8 rounded-full bg-green-500 ml-2 flex items-center justify-center text-white"
+                  >
+                    {{ current_user.first_name[0] }}{{ current_user.last_name[0]
+                    }}
+                  </div>
+                  {% endif %}
+                </div>
+                <div class="text-sm">{{ message.content|nl2br }}</div>
+
+                <!-- Message status indicator (only for sent messages) -->
+                {% if message.sender_id == current_user.id %}
+                <div class="message-status text-xs text-right mt-1">
+                  <span class="status-icon">
+                    <i
+                      class="fas {% if message.status == 'read' %}fa-check-double text-blue-500{% elif message.status == 'delivered' %}fa-check-double{% else %}fa-check{% endif %}"
+                    ></i>
+                  </span>
+                  <span class="status-text ml-1"
+                    >{{ message.status|title }}</span
+                  >
+                </div>
+                {% endif %}
+
+                <!-- Message Attachments -->
+                {% if message.attachments %}
+                <div class="mt-3 flex flex-wrap gap-2">
+                  {% for attachment in message.attachments %}
+                  <a
+                    href="{{ url_for('static', filename=attachment.file_path) }}"
+                    target="_blank"
+                    class="block"
+                  >
+                    {% if attachment.file_path.endswith(('.jpg', '.jpeg',
+                    '.png', '.gif')) %}
+                    <img
+                      src="{{ url_for('static', filename=attachment.file_path) }}"
+                      alt="Attachment"
+                      class="attachment-preview"
+                    />
+                    {% else %}
+                    <div class="bg-gray-100 p-2 rounded flex items-center">
+                      {% if attachment.file_path.endswith('.pdf') %}
+                      <i class="far fa-file-pdf text-red-500 mr-1"></i>
+                      {% elif attachment.file_path.endswith(('.doc', '.docx'))
+                      %}
+                      <i class="far fa-file-word text-blue-500 mr-1"></i>
+                      {% else %}
+                      <i class="far fa-file text-gray-500 mr-1"></i>
+                      {% endif %}
+                      <span class="text-xs"
+                        >{{ attachment.filename|default('Attachment') }}</span
+                      >
+                    </div>
+                    {% endif %}
+                  </a>
+                  {% endfor %}
+                </div>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+
+          <!-- Typing indicator -->
+          <div id="typingIndicator" class="hidden"></div>
+
+          <!-- Message Input Form -->
+          <form
+            action="{{ url_for('student.reply_to_inquiry', inquiry_id=inquiry.id) }}"
+            method="post"
+            enctype="multipart/form-data"
+            class="mt-4"
+            id="messageForm"
+          >
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <div class="relative">
+              <textarea
+                name="message"
+                rows="4"
+                placeholder="Type your reply here..."
+                id="messageInput"
+                class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              ></textarea>
+            </div>
+            <div class="flex items-center justify-between mt-2">
+              <div class="relative">
+                <input
+                  type="file"
+                  id="replyAttachments"
+                  name="attachments"
+                  multiple
+                  class="hidden"
+                />
+                <label
+                  for="replyAttachments"
+                  class="flex items-center cursor-pointer text-sm text-gray-600 hover:text-blue-600"
+                >
+                  <i class="fas fa-paperclip mr-1"></i>
+                  Attach Files
+                </label>
+                <div
+                  id="replyAttachmentPreview"
+                  class="mt-2 flex flex-wrap gap-2"
+                ></div>
+              </div>
+              <button
+                type="submit"
+                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                id="sendButton"
+              >
+                Send Reply <i class="fas fa-paper-plane ml-1"></i>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add notification sound -->
+<audio id="notificationSound" preload="auto">
+  <source
+    src="{{ url_for('static', filename='sounds/notification.mp3') }}"
+    type="audio/mpeg"
+  />
+</audio>
+
+{% endblock %} {% block scripts %}
+<script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/inquiry-chat.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chat-init.js') }}"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    // Scroll to bottom of message history
+    const messageHistory = document.getElementById("messageHistory");
+    if (messageHistory) {
+      messageHistory.scrollTop = messageHistory.scrollHeight;
+    }
+
+    // Handle file attachments preview for replies
+    const replyAttachments = document.getElementById("replyAttachments");
+    const replyAttachmentPreview = document.getElementById("replyAttachmentPreview");
+
+    replyAttachments.addEventListener("change", function (e) {
+      replyAttachmentPreview.innerHTML = "";
+      const files = Array.from(e.target.files);
+
+      // Limit to 3 files
+      if (files.length > 3) {
+        alert("You can only upload up to 3 files.");
+        e.target.value = "";
+        return;
+      }
+
+      files.forEach((file) => {
+        // Check file size (5MB limit)
+        if (file.size > 5 * 1024 * 1024) {
+          alert(`File ${file.name} is too large. Maximum file size is 5MB.`);
+          return;
+        }
+
+        const preview = document.createElement("div");
+        preview.className =
+          "bg-gray-100 p-2 rounded-md flex items-center text-sm";
+
+        // Preview Icon
+        const icon = document.createElement("i");
+        if (file.type.match("image.*")) {
+          icon.className = "far fa-image text-blue-500 mr-1";
+        } else if (file.type === "application/pdf") {
+          icon.className = "far fa-file-pdf text-red-500 mr-1";
+        } else if (
+          file.type ===
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+          file.type === "application/msword"
+        ) {
+          icon.className = "far fa-file-word text-blue-500 mr-1";
+        } else {
+          icon.className = "far fa-file text-gray-500 mr-1";
+        }
+        preview.appendChild(icon);
+
+        const fileName = document.createElement("span");
+        fileName.textContent =
+          file.name.length > 15
+            ? file.name.substring(0, 15) + "..."
+            : file.name;
+        preview.appendChild(fileName);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "ml-2 text-red-500 hover:text-red-700";
+        removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+        removeBtn.addEventListener("click", function () {
+          preview.remove();
+          // Note: This doesn't actually remove the file from the input
+          // You would need a more complex solution to truly remove files
+        });
+        preview.appendChild(removeBtn);
+
+        replyAttachmentPreview.appendChild(preview);
+      });
+    });
+
+    // Initialize the chat manager for real-time features
+    if (window.io) {
+      const socket = io();
+
+      // Initialize the inquiry chat
+      const inquiryChat = new InquiryChat({
+        socket: socket,
+        messageInput: document.getElementById('messageInput'),
+        sendButton: document.getElementById('sendButton'),
+        messageContainer: document.getElementById('messageHistory'),
+        typingIndicator: document.getElementById('typingIndicator'),
+        inquiryId: {{ inquiry.id }},
+        currentUserId: {{ current_user.id }},
+        currentUserRole: '{{ current_user.role }}',
+        currentUserName: '{{ current_user.get_full_name() }}',
+        currentUserInitials: '{{ current_user.first_name[0] }}{{ current_user.last_name[0] }}'
+      });
+    }
+  });
+</script>
+{% endblock %}

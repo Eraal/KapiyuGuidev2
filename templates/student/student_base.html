@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}KapiyuGuide - Student Portal{% endblock %}</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+    />
+    <link rel="stylesheet" href="/static/css/customs.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    {% block extra_head %}{% endblock %}
+  </head>
+  <body class="bg-gray-100 min-h-screen flex flex-col">
+    <!-- Top Navigation Bar -->
+    <header class="bg-blue-900 text-white shadow-md">
+      <div class="container mx-auto px-4">
+        <div class="flex justify-between items-center py-3">
+          <div class="flex items-center space-x-4">
+            <!-- Mobile menu button -->
+            <button
+              id="mobileMenuBtn"
+              class="md:hidden text-white focus:outline-none"
+            >
+              <i class="fas fa-bars text-xl"></i>
+            </button>
+
+            <!-- Logo -->
+            <a
+              href="{{ url_for('student.dashboard') }}"
+              class="flex items-center"
+            >
+              <img
+                src="/static/images/schoollogo.png"
+                alt="KapiyuGuide Logo"
+                class="h-10 w-auto"
+              />
+              <span class="ml-2 text-lg font-bold">KapiyuGuide</span>
+            </a>
+          </div>
+
+          <div class="flex items-center space-x-6">
+            <!-- Notifications Dropdown -->
+            <div class="relative" id="notificationsDropdown">
+              <button class="text-white focus:outline-none relative p-1">
+                <i class="fas fa-bell text-xl"></i>
+                <span
+                  id="notificationBadge"
+                  class="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center -mt-1 -mr-1 {% if unread_notifications_count == 0 %}hidden{% endif %}"
+                >
+                  {{ unread_notifications_count|default(0) }}
+                </span>
+              </button>
+
+              <!-- Notifications Panel -->
+              <div
+                class="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-lg overflow-hidden z-20 hidden"
+                id="notificationsPanel"
+              >
+                <div
+                  class="py-2 px-3 bg-blue-800 text-white font-bold flex justify-between items-center"
+                >
+                  <span>Notifications</span>
+                  <a href="#" class="text-xs text-blue-200 hover:text-white"
+                    >Mark all as read</a
+                  >
+                </div>
+                <div
+                  class="max-h-64 overflow-y-auto"
+                  id="notificationsContainer"
+                >
+                  {% if notifications %} {% for notification in notifications %}
+                  <div
+                    class="p-3 border-b hover:bg-gray-50 {% if not notification.is_read %}bg-blue-50{% endif %}"
+                  >
+                    <div class="flex items-start">
+                      <div class="flex-shrink-0 pt-1">
+                        <i class="fas fa-info-circle text-blue-500"></i>
+                      </div>
+                      <div class="ml-3">
+                        <div class="text-sm font-medium text-gray-900">
+                          {{ notification.title }}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          {{ notification.message }}
+                        </div>
+                        <div class="text-xs text-gray-400 mt-1">
+                          {{ notification.created_at.strftime('%b %d, %Y %H:%M')
+                          }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {% endfor %} {% else %}
+                  <div class="p-3 text-center text-gray-500">
+                    No notifications
+                  </div>
+                  {% endif %}
+                </div>
+                <div class="py-2 px-3 bg-gray-100 text-center">
+                  <a href="#" class="text-sm text-blue-600 hover:underline"
+                    >View all notifications</a
+                  >
+                </div>
+              </div>
+            </div>
+
+            <!-- User Dropdown -->
+            <div class="relative" id="userDropdown">
+              <button class="flex items-center text-white focus:outline-none">
+                <div
+                  class="h-8 w-8 rounded-full bg-blue-700 flex items-center justify-center"
+                >
+                  {% if current_user.profile_pic %}
+                  <img
+                    src="{{ current_user.profile_pic }}"
+                    alt="Profile"
+                    class="h-8 w-8 rounded-full object-cover"
+                  />
+                  {% else %}
+                  <span class="font-medium text-sm"
+                    >{{ current_user.first_name[0] }}{{
+                    current_user.last_name[0] }}</span
+                  >
+                  {% endif %}
+                </div>
+                <span class="ml-2 hidden md:inline"
+                  >{{ current_user.first_name }} {{ current_user.last_name
+                  }}</span
+                >
+                <i class="fas fa-chevron-down ml-1 text-xs"></i>
+              </button>
+
+              <!-- User Dropdown Menu -->
+              <div
+                class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg overflow-hidden z-20 hidden"
+                id="userMenu"
+              >
+                <div class="py-2">
+                  <a
+                    href="{{ url_for('student.inquiries') }}"
+                    class="block px-4 py-2 text-gray-800 hover:bg-blue-100"
+                  >
+                    <i class="fas fa-user-circle mr-2"></i> My Profile
+                  </a>
+                  <a
+                    href="{{ url_for('student.inquiries') }}"
+                    class="block px-4 py-2 text-gray-800 hover:bg-blue-100"
+                  >
+                    <i class="fas fa-cog mr-2"></i> Account Settings
+                  </a>
+                  <div class="border-t my-1"></div>
+                  <a
+                    href="{{ url_for('auth.logout') }}"
+                    class="block px-4 py-2 text-red-600 hover:bg-red-50"
+                  >
+                    <i class="fas fa-sign-out-alt mr-2"></i> Logout
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="flex flex-1">
+      <!-- Sidebar - Desktop -->
+      <aside class="w-64 bg-blue-800 text-white hidden md:block" id="sidebar">
+        <div class="h-full flex flex-col">
+          <div class="flex-1 overflow-y-auto p-4">
+            <div class="mb-8">
+              <div class="flex items-center justify-center mb-4">
+                <div
+                  class="h-16 w-16 rounded-full bg-white flex items-center justify-center shadow-md"
+                >
+                  {% if current_user.profile_pic %}
+                  <img
+                    src="{{ current_user.profile_pic }}"
+                    alt="Profile"
+                    class="h-16 w-16 rounded-full object-cover"
+                  />
+                  {% else %}
+                  <span class="text-blue-800 font-bold text-2xl"
+                    >{{ current_user.first_name[0] }}{{
+                    current_user.last_name[0] }}</span
+                  >
+                  {% endif %}
+                </div>
+              </div>
+              <div class="text-center">
+                <h3 class="font-bold text-lg">
+                  {{ current_user.first_name }} {{ current_user.last_name }}
+                </h3>
+                <p class="text-sm text-blue-200">{{ current_user.email }}</p>
+                <div class="mt-2 flex justify-center">
+                  <span
+                    class="bg-green-500 text-green-100 text-xs px-2 py-1 rounded-full"
+                  >
+                    Student
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <nav>
+              <a
+                href="{{ url_for('student.dashboard') }}"
+                class="sidebar-item flex items-center px-4 py-3 {% if request.endpoint == 'student.dashboard' %}bg-blue-900 text-white font-semibold rounded-md{% else %}text-blue-200 hover:bg-blue-700 hover:text-white rounded-md{% endif %}"
+              >
+                <div class="mr-3">
+                  <i class="fas fa-tachometer-alt"></i>
+                </div>
+                <span>Dashboard</span>
+              </a>
+
+              <a
+                href="{{ url_for('student.inquiries') }}"
+                class="sidebar-item flex items-center px-4 py-3 {% if request.endpoint == 'student.inquiries' %}bg-blue-900 text-white font-semibold rounded-md{% else %}text-blue-200 hover:bg-blue-700 hover:text-white rounded-md{% endif %}"
+              >
+                <div class="mr-3">
+                  <i class="fas fa-question-circle"></i>
+                </div>
+                <span>My Inquiries</span>
+                <span
+                  class="ml-auto bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center"
+                  id="pendingInquiriesBadge"
+                >
+                  {{ pending_inquiries|default(0) }}
+                </span>
+              </a>
+
+              <a
+                href="{{ url_for('student.inquiries') }}"
+                class="sidebar-item flex items-center px-4 py-3 {% if request.endpoint == 'student.inquiries' %}bg-blue-900 text-white font-semibold rounded-md{% else %}text-blue-200 hover:bg-blue-700 hover:text-white rounded-md{% endif %}"
+              >
+                <div class="mr-3">
+                  <i class="fas fa-calendar-alt"></i>
+                </div>
+                <span>Counseling Sessions</span>
+                <span
+                  class="ml-auto bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center"
+                  id="upcomingSessionsBadge"
+                >
+                  {{ upcoming_sessions|default(0) }}
+                </span>
+              </a>
+
+              <a
+                href="{{ url_for('student.inquiries') }}"
+                class="sidebar-item flex items-center px-4 py-3 {% if request.endpoint == 'student.inquiries' %}bg-blue-900 text-white font-semibold rounded-md{% else %}text-blue-200 hover:bg-blue-700 hover:text-white rounded-md{% endif %}"
+              >
+                <div class="mr-3">
+                  <i class="fas fa-bullhorn"></i>
+                </div>
+                <span>Announcements</span>
+              </a>
+
+              <a
+                href="{{ url_for('student.inquiries') }}"
+                class="sidebar-item flex items-center px-4 py-3 {% if request.endpoint == 'student.inquiries' %}bg-blue-900 text-white font-semibold rounded-md{% else %}text-blue-200 hover:bg-blue-700 hover:text-white rounded-md{% endif %}"
+              >
+                <div class="mr-3">
+                  <i class="fas fa-building"></i>
+                </div>
+                <span>University Offices</span>
+              </a>
+            </nav>
+          </div>
+
+          <div class="p-4 border-t border-blue-700">
+            <div class="text-xs text-blue-300 mb-1">Last Login</div>
+            <div class="text-sm text-blue-100">
+              {% if current_user.last_activity %} {{
+              current_user.last_activity.strftime('%b %d, %Y %H:%M') }} {% else
+              %} First Login {% endif %}
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Mobile Sidebar Overlay -->
+      <div
+        class="fixed inset-0 bg-black opacity-50 z-20 hidden"
+        id="sidebarOverlay"
+      ></div>
+
+      <!-- Main Content -->
+      <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100">
+        <div class="container mx-auto px-4 py-6">
+          {% with messages = get_flashed_messages(with_categories=true) %} {% if
+          messages %} {% for category, message in messages %}
+          <div
+            class="mb-4 {{ 'bg-green-100 border-green-400 text-green-700' if category == 'success' else 'bg-red-100 border-red-400 text-red-700' }} px-4 py-3 rounded border"
+            role="alert"
+          >
+            <div class="flex items-center">
+              <i
+                class="fas {{ 'fa-check-circle' if category == 'success' else 'fa-exclamation-circle' }} mr-2"
+              ></i>
+              <span>{{ message }}</span>
+              <button
+                class="ml-auto focus:outline-none"
+                onclick="this.parentElement.parentElement.remove()"
+              >
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+          </div>
+          {% endfor %} {% endif %} {% endwith %} {% block content %}{% endblock
+          %}
+        </div>
+      </main>
+    </div>
+
+    <!-- Audio for notifications -->
+    <audio
+      id="notificationSound"
+      src="/static/sounds/notification.mp3"
+      preload="auto"
+    ></audio>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        // Mobile menu toggle
+        const mobileMenuBtn = document.getElementById("mobileMenuBtn");
+        const sidebar = document.getElementById("sidebar");
+        const sidebarOverlay = document.getElementById("sidebarOverlay");
+
+        mobileMenuBtn.addEventListener("click", function () {
+          sidebar.classList.toggle("hidden");
+          sidebar.classList.toggle("fixed");
+          sidebar.classList.toggle("z-30");
+          sidebar.classList.toggle("inset-y-0");
+          sidebar.classList.toggle("left-0");
+          sidebarOverlay.classList.toggle("hidden");
+        });
+
+        sidebarOverlay.addEventListener("click", function () {
+          sidebar.classList.add("hidden");
+          sidebar.classList.remove("fixed", "z-30", "inset-y-0", "left-0");
+          sidebarOverlay.classList.add("hidden");
+        });
+
+        // User dropdown toggle
+        const userDropdownBtn = document.querySelector("#userDropdown button");
+        const userMenu = document.getElementById("userMenu");
+
+        userDropdownBtn.addEventListener("click", function () {
+          userMenu.classList.toggle("hidden");
+          notificationsPanel.classList.add("hidden"); // Close notifications panel if open
+        });
+
+        // Notifications dropdown toggle
+        const notificationsBtn = document.querySelector(
+          "#notificationsDropdown button"
+        );
+        const notificationsPanel =
+          document.getElementById("notificationsPanel");
+
+        notificationsBtn.addEventListener("click", function () {
+          notificationsPanel.classList.toggle("hidden");
+          userMenu.classList.add("hidden"); // Close user menu if open
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener("click", function (event) {
+          if (
+            !userDropdownBtn.contains(event.target) &&
+            !userMenu.contains(event.target)
+          ) {
+            userMenu.classList.add("hidden");
+          }
+
+          if (
+            !notificationsBtn.contains(event.target) &&
+            !notificationsPanel.contains(event.target)
+          ) {
+            notificationsPanel.classList.add("hidden");
+          }
+        });
+
+        // WebSocket connection for real-time updates
+        const socket = io();
+        socket.on("connect", function () {
+          console.log("Connected to WebSocket");
+
+          // Join student room
+          socket.emit("join", { room: "student_room" });
+          socket.emit("join", { room: `student_{{ current_user.id }}` });
+        });
+
+        // Listen for notification events
+        socket.on("new_notification", function (data) {
+          // Update notification badge
+          const notificationBadge =
+            document.getElementById("notificationBadge");
+          let count = parseInt(notificationBadge.innerText || "0");
+          count += 1;
+          notificationBadge.innerText = count;
+          notificationBadge.classList.remove("hidden");
+
+          // Add notification to dropdown
+          const container = document.getElementById("notificationsContainer");
+          const emptyMessage = container.querySelector(
+            ".text-center.text-gray-500"
+          );
+          if (emptyMessage) {
+            container.innerHTML = "";
+          }
+
+          const notificationElement = document.createElement("div");
+          notificationElement.className =
+            "p-3 border-b hover:bg-gray-50 bg-blue-50";
+          notificationElement.innerHTML = `
+                  <div class="flex items-start">
+                      <div class="flex-shrink-0 pt-1">
+                          <i class="fas fa-info-circle text-blue-500"></i>
+                      </div>
+                      <div class="ml-3">
+                          <div class="text-sm font-medium text-gray-900">${data.title}</div>
+                          <div class="text-xs text-gray-500">${data.message}</div>
+                          <div class="text-xs text-gray-400 mt-1">Just now</div>
+                      </div>
+                  </div>
+              `;
+          container.prepend(notificationElement);
+
+          // Play notification sound
+          const notificationSound =
+            document.getElementById("notificationSound");
+          notificationSound.play();
+        });
+
+        // Additional WebSocket event listeners can be added here
+      });
+    </script>
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

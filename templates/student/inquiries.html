@@ -1,0 +1,554 @@
+{% extends "student/student_base.html" %}
+{% block title %}My Inquiries - KapiyuGuide{% endblock %}
+
+{% block extra_head %}
+<style>
+    .tab-active {
+        color: #3b82f6;
+        border-bottom: 2px solid #3b82f6;
+    }
+    .tab-inactive {
+        color: #6b7280;
+        border-bottom: 2px solid transparent;
+    }
+    .attachment-preview {
+        max-width: 100px;
+        max-height: 100px;
+    }
+    .inquiry-status-pending { 
+        background-color: #fef3c7; 
+        color: #92400e; 
+    }
+    .inquiry-status-in_progress { 
+        background-color: #dbeafe; 
+        color: #1e40af; 
+    }
+    .inquiry-status-resolved { 
+        background-color: #d1fae5; 
+        color: #065f46; 
+    }
+    .inquiry-status-reopened { 
+        background-color: #ede9fe; 
+        color: #5b21b6; 
+    }
+    .stats-card {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .stats-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    }
+    .office-card {
+        transition: all 0.3s ease;
+    }
+    .office-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+    .filter-section {
+        opacity: 0.97;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-6">
+    <!-- Page Header -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-800">My Inquiries</h1>
+            <p class="text-gray-600">Submit and track inquiries to different university offices</p>
+        </div>
+        <div class="mt-4 md:mt-0">
+            <button id="newInquiryBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md flex items-center transition-all duration-300 transform hover:scale-105">
+                <i class="fas fa-plus-circle mr-2"></i>
+                <span>New Inquiry</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats and Filters Section -->
+    <div class="mb-8">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <!-- Stats Cards -->
+            <div class="stats-card bg-white rounded-xl shadow-sm p-4 flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-500">Total Inquiries</p>
+                    <h3 class="text-2xl font-bold text-gray-800">{{ stats.total }}</h3>
+                </div>
+                <div class="bg-blue-100 p-3 rounded-full">
+                    <i class="fas fa-inbox text-blue-600 text-xl"></i>
+                </div>
+            </div>
+            
+            <div class="stats-card bg-white rounded-xl shadow-sm p-4 flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-500">Pending</p>
+                    <h3 class="text-2xl font-bold text-yellow-600">{{ stats.pending }}</h3>
+                </div>
+                <div class="bg-yellow-100 p-3 rounded-full">
+                    <i class="fas fa-clock text-yellow-600 text-xl"></i>
+                </div>
+            </div>
+            
+            <div class="stats-card bg-white rounded-xl shadow-sm p-4 flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-500">In Progress</p>
+                    <h3 class="text-2xl font-bold text-blue-600">{{ stats.in_progress }}</h3>
+                </div>
+                <div class="bg-blue-100 p-3 rounded-full">
+                    <i class="fas fa-spinner text-blue-600 text-xl"></i>
+                </div>
+            </div>
+            
+            <div class="stats-card bg-white rounded-xl shadow-sm p-4 flex items-center justify-between">
+                <div>
+                    <p class="text-sm font-medium text-gray-500">Resolved</p>
+                    <h3 class="text-2xl font-bold text-green-600">{{ stats.resolved }}</h3>
+                </div>
+                <div class="bg-green-100 p-3 rounded-full">
+                    <i class="fas fa-check-circle text-green-600 text-xl"></i>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Filter Section -->
+        <div class="filter-section bg-white rounded-xl shadow-sm mt-4 p-5">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">Filter Inquiries</h2>
+            <form action="{{ url_for('student.inquiries') }}" method="get" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select id="status" name="status" class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                        <option value="all" {% if current_status == 'all' %}selected{% endif %}>All Statuses</option>
+                        <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>Pending</option>
+                        <option value="in_progress" {% if current_status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                        <option value="resolved" {% if current_status == 'resolved' %}selected{% endif %}>Resolved</option>
+                        <option value="reopened" {% if current_status == 'reopened' %}selected{% endif %}>Reopened</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="office_id" class="block text-sm font-medium text-gray-700 mb-1">Office</label>
+                    <select id="office_id" name="office_id" class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                        <option value="all" {% if current_office == 'all' %}selected{% endif %}>All Offices</option>
+                        {% for office in offices %}
+                        <option value="{{ office.id }}" {% if current_office|int == office.id %}selected{% endif %}>{{ office.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="flex items-end">
+                    <button type="submit" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-200">
+                        <i class="fas fa-filter mr-2"></i> Apply Filters
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Inquiries Table -->
+    <div class="bg-white rounded-xl shadow-sm mb-8">
+        <div class="border-b">
+            <div class="flex overflow-x-auto">
+                <a href="{{ url_for('student.inquiries') }}" class="px-6 py-4 inline-block text-center {% if current_status == 'all' %}tab-active{% else %}tab-inactive{% endif %}">
+                    All
+                </a>
+                <a href="{{ url_for('student.inquiries', status='pending') }}" class="px-6 py-4 inline-block text-center {% if current_status == 'pending' %}tab-active{% else %}tab-inactive{% endif %}">
+                    Pending
+                </a>
+                <a href="{{ url_for('student.inquiries', status='in_progress') }}" class="px-6 py-4 inline-block text-center {% if current_status == 'in_progress' %}tab-active{% else %}tab-inactive{% endif %}">
+                    In Progress
+                </a>
+                <a href="{{ url_for('student.inquiries', status='resolved') }}" class="px-6 py-4 inline-block text-center {% if current_status == 'resolved' %}tab-active{% else %}tab-inactive{% endif %}">
+                    Resolved
+                </a>
+            </div>
+        </div>
+
+        {% if inquiries %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200" id="inquiries-table">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Subject
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Office
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Status
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Date
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Action
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for inquiry in inquiries %}
+                    <tr class="hover:bg-gray-50 transition-colors duration-150" data-inquiry-id="{{ inquiry.id }}">
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm font-medium text-gray-900 truncate max-w-[200px]">
+                                {{ inquiry.subject }}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-500">
+                                {{ inquiry.office.name }}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="inquiry-status px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full inquiry-status-{{ inquiry.status }}">
+                                {{ inquiry.status|replace('_', ' ')|title }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-500">
+                                {{ inquiry.created_at.strftime('%b %d, %Y') }}
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <a href="{{ url_for('student.view_inquiry', inquiry_id=inquiry.id) }}" class="text-blue-600 hover:text-blue-800 transition-colors duration-150">
+                                <i class="fas fa-eye mr-1"></i> View
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        {% if pagination.pages > 1 %}
+        <div class="px-6 py-4 bg-gray-50 border-t flex justify-between items-center rounded-b-xl">
+            <div>
+                <span class="text-sm text-gray-700">
+                    Showing <span class="font-medium">{{ pagination.page }}</span> of <span class="font-medium">{{ pagination.pages }}</span> pages
+                </span>
+            </div>
+            <div class="flex items-center space-x-2">
+                {% if pagination.has_prev %}
+                <a href="{{ url_for('student.inquiries', page=pagination.prev_num, status=current_status, office_id=current_office) }}" class="px-3 py-1 border rounded text-sm text-blue-600 hover:bg-blue-50 transition-colors duration-150">
+                    <i class="fas fa-chevron-left mr-1"></i> Previous
+                </a>
+                {% else %}
+                <span class="px-3 py-1 border rounded text-sm text-gray-400 cursor-not-allowed">
+                    <i class="fas fa-chevron-left mr-1"></i> Previous
+                </span>
+                {% endif %}
+
+                {% if pagination.has_next %}
+                <a href="{{ url_for('student.inquiries', page=pagination.next_num, status=current_status, office_id=current_office) }}" class="px-3 py-1 border rounded text-sm text-blue-600 hover:bg-blue-50 transition-colors duration-150">
+                    Next <i class="fas fa-chevron-right ml-1"></i>
+                </a>
+                {% else %}
+                <span class="px-3 py-1 border rounded text-sm text-gray-400 cursor-not-allowed">
+                    Next <i class="fas fa-chevron-right ml-1"></i>
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="py-16 text-center">
+            <i class="fas fa-inbox text-gray-400 text-5xl mb-4"></i>
+            <h3 class="text-xl font-medium text-gray-700">No inquiries found</h3>
+            <p class="text-gray-500 mt-1">You haven't submitted any inquiries yet or none match your current filters</p>
+            <button id="emptyNewInquiryBtn" class="mt-6 px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-all duration-300 transform hover:scale-105">
+                <i class="fas fa-plus-circle mr-2"></i> Submit New Inquiry
+            </button>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- University Offices Section -->
+    <div class="mb-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center">
+            <i class="fas fa-building mr-2 text-blue-600"></i>
+            University Offices
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% for office in offices %}
+            <div class="office-card bg-white rounded-xl shadow-sm">
+                <div class="p-6">
+                    <div class="flex items-start">
+                        <div class="rounded-full p-3 bg-blue-100 text-blue-600">
+                            <i class="fas fa-building text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <h3 class="text-lg font-medium text-gray-900">{{ office.name }}</h3>
+                            <p class="text-sm text-gray-500 mt-1">{{ office.description|truncate(100) }}</p>
+                        </div>
+                    </div>
+                    <div class="mt-4 flex justify-between items-center">
+                        <span class="text-xs text-gray-500">
+                            {% if office.supports_video %}
+                            <i class="fas fa-video text-green-500 mr-1"></i> Video Counseling Available
+                            {% endif %}
+                        </span>
+                        <button class="text-sm text-white bg-blue-500 hover:bg-blue-600 px-3 py-1 rounded-md new-office-inquiry transition-colors duration-200" data-office-id="{{ office.id }}" data-office-name="{{ office.name }}">
+                            Submit Inquiry <i class="fas fa-chevron-right ml-1 text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- New Inquiry Modal -->
+    <div id="newInquiryModal" class="fixed inset-0 z-50 hidden">
+        <div class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm" id="modalOverlay"></div>
+        <div class="bg-white rounded-xl shadow-lg max-w-2xl w-full absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between p-4 border-b">
+                <h3 class="text-lg font-bold text-gray-800">Submit New Inquiry</h3>
+                <button id="closeModal" class="text-gray-500 hover:text-gray-700 focus:outline-none transition-colors">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="inquiryForm" action="{{ url_for('student.create_inquiry') }}" method="post" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+                    <div class="mb-4">
+                        <label for="office_id" class="block text-sm font-medium text-gray-700 mb-1">Select Office</label>
+                        <select id="office_id" name="office_id" class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            <option value="">Select an office</option>
+                            {% for office in offices %}
+                            <option value="{{ office.id }}">{{ office.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-4" id="concernTypesContainer">
+                        <label for="concern_type_id" class="block text-sm font-medium text-gray-700 mb-1">Nature of Concern</label>
+                        <select id="concern_type_id" name="concern_type_id" class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" disabled>
+                            <option value="">Select an office first</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-4 hidden" id="otherConcernContainer">
+                        <label for="other_concern" class="block text-sm font-medium text-gray-700 mb-1">Please specify concern</label>
+                        <input type="text" id="other_concern" name="other_concern" class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="subject" class="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                        <input type="text" id="subject" name="subject" class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="message" class="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                        <textarea id="message" name="message" rows="4" class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required></textarea>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Attachments (Optional)</label>
+                        <div class="flex items-center justify-center w-full">
+                            <label for="fileUpload" class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition duration-300">
+                                <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                                    <i class="fas fa-cloud-upload-alt text-gray-400 text-3xl mb-2"></i>
+                                    <p class="mb-2 text-sm text-gray-500">Click to upload or drag and drop</p>
+                                    <p class="text-xs text-gray-500">PDF, DOC, DOCX, JPEG, PNG, etc.</p>
+                                </div>
+                                <input id="fileUpload" name="attachments" type="file" class="hidden" multiple />
+                            </label>
+                        </div>
+                        <div id="filePreview" class="mt-2 flex flex-wrap gap-2"></div>
+                        <p class="text-xs text-gray-500 mt-1">You can upload up to 3 files (max 5MB each)</p>
+                    </div>
+
+                    <div class="flex justify-end mt-6">
+                        <button type="button" id="cancelInquiry" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-md mr-2 transition-colors duration-200">
+                            Cancel
+                        </button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors duration-200">
+                            <i class="fas fa-paper-plane mr-1"></i> Submit Inquiry
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // New Inquiry Modal
+        const newInquiryBtn = document.getElementById('newInquiryBtn');
+        const emptyNewInquiryBtn = document.getElementById('emptyNewInquiryBtn');
+        const newInquiryModal = document.getElementById('newInquiryModal');
+        const modalOverlay = document.getElementById('modalOverlay');
+        const closeModal = document.getElementById('closeModal');
+        const cancelInquiry = document.getElementById('cancelInquiry');
+        const officeButtons = document.querySelectorAll('.new-office-inquiry');
+
+        function openInquiryModal(officeId = null, officeName = null) {
+            newInquiryModal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+            
+            if (officeId) {
+                const officeSelect = document.getElementById('office_id');
+                officeSelect.value = officeId;
+                
+                // Trigger the change event to load concern types
+                const event = new Event('change');
+                officeSelect.dispatchEvent(event);
+            }
+        }
+
+        function closeInquiryModal() {
+            newInquiryModal.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+            document.getElementById('inquiryForm').reset();
+            document.getElementById('filePreview').innerHTML = '';
+        }
+
+        if (newInquiryBtn) {
+            newInquiryBtn.addEventListener('click', function() {
+                openInquiryModal();
+            });
+        }
+
+        if (emptyNewInquiryBtn) {
+            emptyNewInquiryBtn.addEventListener('click', function() {
+                openInquiryModal();
+            });
+        }
+
+        officeButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const officeId = this.getAttribute('data-office-id');
+                const officeName = this.getAttribute('data-office-name');
+                openInquiryModal(officeId, officeName);
+            });
+        });
+
+        closeModal.addEventListener('click', closeInquiryModal);
+        modalOverlay.addEventListener('click', closeInquiryModal);
+        cancelInquiry.addEventListener('click', closeInquiryModal);
+
+        // Add escape key handler for modal
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape' && !newInquiryModal.classList.contains('hidden')) {
+                closeInquiryModal();
+            }
+        });
+
+        // Handle office selection and concern types loading
+        const officeSelect = document.getElementById('office_id');
+        const concernTypesContainer = document.getElementById('concernTypesContainer');
+        const concernTypeSelect = document.getElementById('concern_type_id');
+        const otherConcernContainer = document.getElementById('otherConcernContainer');
+
+        officeSelect.addEventListener('change', function() {
+            const officeId = this.value;
+            if (officeId) {
+                // Make an AJAX request to get concern types for the selected office
+                fetch(`/student/api/office/${officeId}/concern-types`)
+                    .then(response => response.json())
+                    .then(data => {
+                        // Enable concern type selection
+                        concernTypeSelect.disabled = false;
+                        concernTypeSelect.innerHTML = '<option value="">Select a concern type</option>';
+                        
+                        // Add the concern types to the dropdown
+                        data.concern_types.forEach(concern => {
+                            const option = document.createElement('option');
+                            option.value = concern.id;
+                            option.textContent = concern.name;
+                            option.dataset.allowsOther = concern.allows_other;
+                            concernTypeSelect.appendChild(option);
+                        });
+                    })
+                    .catch(error => {
+                        console.error('Error fetching concern types:', error);
+                    });
+            } else {
+                concernTypeSelect.disabled = true;
+                concernTypeSelect.innerHTML = '<option value="">Select an office first</option>';
+                otherConcernContainer.classList.add('hidden');
+            }
+        });
+
+        // Handle concern type selection and "Other" concern specification
+        concernTypeSelect.addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            if (selectedOption && selectedOption.dataset.allowsOther === 'true') {
+                otherConcernContainer.classList.remove('hidden');
+            } else {
+                otherConcernContainer.classList.add('hidden');
+            }
+        });
+
+        // Handle file upload preview
+        const fileUpload = document.getElementById('fileUpload');
+        const filePreview = document.getElementById('filePreview');
+
+        fileUpload.addEventListener('change', function(e) {
+            filePreview.innerHTML = '';
+            const files = Array.from(e.target.files);
+            
+            // Limit to 3 files
+            if (files.length > 3) {
+                alert('You can only upload up to 3 files.');
+                e.target.value = '';
+                return;
+            }
+            
+            files.forEach(file => {
+                // Check file size (5MB limit)
+                if (file.size > 5 * 1024 * 1024) {
+                    alert(`File ${file.name} is too large. Maximum file size is 5MB.`);
+                    return;
+                }
+                
+                const preview = document.createElement('div');
+                preview.className = 'relative bg-gray-100 p-2 rounded flex items-center';
+                
+                // Show file icon or image preview based on file type
+                if (file.type.startsWith('image/')) {
+                    const img = document.createElement('img');
+                    img.className = 'attachment-preview mr-2';
+                    img.file = file;
+                    preview.appendChild(img);
+                    
+                    const reader = new FileReader();
+                    reader.onload = (function(aImg) { 
+                        return function(e) { 
+                            aImg.src = e.target.result; 
+                        }; 
+                    })(img);
+                    reader.readAsDataURL(file);
+                } else {
+                    // Show generic file icon for non-image files
+                    const icon = document.createElement('i');
+                    
+                    if (file.type.includes('pdf')) {
+                        icon.className = 'far fa-file-pdf text-red-500 text-2xl mr-2';
+                    } else if (file.type.includes('word') || file.name.endsWith('.doc') || file.name.endsWith('.docx')) {
+                        icon.className = 'far fa-file-word text-blue-500 text-2xl mr-2';
+                    } else if (file.type.includes('excel') || file.name.endsWith('.xls') || file.name.endsWith('.xlsx')) {
+                        icon.className = 'far fa-file-excel text-green-500 text-2xl mr-2';
+                    } else {
+                        icon.className = 'far fa-file text-gray-500 text-2xl mr-2';
+                    }
+                    
+                    preview.appendChild(icon);
+                }
+                
+                const fileInfo = document.createElement('div');
+                fileInfo.className = 'text-sm';
+                fileInfo.textContent = file.name.length > 20 ? file.name.substring(0, 20) + '...' : file.name;
+                preview.appendChild(fileInfo);
+                
+                filePreview.appendChild(preview);
+            });
+        });
+    });
+</script>
+{% endblock %}
