@@ -58,6 +58,7 @@
         opacity: 1;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
         max-width: 100%;
+        cursor: default;
       }
 
       .flash-messages {
@@ -77,6 +78,59 @@
         color: white;
         border-radius: 50%;
         padding: 2px 5px;
+      }
+
+      .close-flash {
+        cursor: pointer;
+        z-index: 10;
+      }
+
+      /* Typing indicator styles */
+      .typing-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding: 4px 8px;
+        background-color: rgba(229, 231, 235, 0.5);
+        border-radius: 12px;
+        margin-top: 4px;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .typing-indicator.visible {
+        opacity: 1;
+      }
+
+      .typing-indicator-dot {
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background-color: #4f5c68;
+        animation: typing-wave 1.4s infinite ease-in-out;
+      }
+
+      .typing-indicator-dot:nth-child(1) {
+        animation-delay: 0s;
+      }
+
+      .typing-indicator-dot:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+
+      .typing-indicator-dot:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+
+      @keyframes typing-wave {
+        0%,
+        60%,
+        100% {
+          transform: translateY(0);
+        }
+        30% {
+          transform: translateY(-4px);
+        }
       }
     </style>
   </head>
@@ -102,7 +156,9 @@
         <span>{{ message }}</span>
       </div>
       <button
+        type="button"
         class="close-flash absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+        onclick="closeFlashMessage(this)"
       >
         <i class="fas fa-times"></i>
       </button>
@@ -209,7 +265,7 @@
         <div class="p-4 border-b">
           <div class="flex items-center mb-3">
             <div
-              class="w-12 h-12 rounded-full overflow-hidden bg-green-800 mr-3"
+              class="w-12 h-12 rounded-full overflow-hidden bg-green-800 mr-3 relative"
             >
               {% if current_user.profile_pic %}
               <img
@@ -224,6 +280,12 @@
                 {{ current_user.first_name[0] }}{{ current_user.last_name[0] }}
               </div>
               {% endif %}
+              <!-- Status indicator positioned at bottom right, overlapping image edge -->
+              <div
+                id="staff-status-indicator"
+                class="absolute bottom-0 right-0 translate-y-1/4 w-3 h-3 rounded-full bg-green-500 border-2 border-white z-10"
+                title="Online"
+              ></div>
             </div>
             <div>
               <h3 class="font-semibold text-green-800">
@@ -442,6 +504,17 @@
       // Make user ID available to JS
       window.currentUserId = {{ current_user.id }};
 
+      // Function to close flash message (global scope)
+      function closeFlashMessage(button) {
+          const flashMessage = button.closest('.flash-message');
+          if (flashMessage) {
+              flashMessage.style.opacity = '0';
+              setTimeout(() => {
+                  flashMessage.remove();
+              }, 500);
+          }
+      }
+
       document.addEventListener('DOMContentLoaded', function() {
           // Initialize the socket manager with office-specific info
           const officeSocketManager = new OfficeSocketManager({
@@ -453,24 +526,27 @@
           // Connect to socket
           officeSocketManager.initialize().then(() => {
               console.log('Connected to office notification system');
+              // Make sure office-connection-status indicator is green
+              const connectionStatus = document.getElementById('office-connection-status');
+              if (connectionStatus) {
+                  connectionStatus.classList.remove('text-red-500');
+                  connectionStatus.classList.add('text-green-500');
+                  connectionStatus.setAttribute('title', 'Connected to notification system');
+              }
+
+              // Immediately send online status when connected
+              officeSocketManager.emit('staff_status', {
+                  user_id: window.currentUserId,
+                  office_id: {{ current_user.office_admin.office_id }},
+                  status: 'online',
+                  timestamp: Date.now()
+              });
           }).catch(error => {
               console.error('Failed to connect to notification system', error);
           });
 
           // Make it available globally
           window.socketManager = officeSocketManager;
-
-          // Handle flash message dismissal
-          const closeButtons = document.querySelectorAll('.close-flash');
-          closeButtons.forEach(button => {
-              button.addEventListener('click', function() {
-                  const flashMessage = this.closest('.flash-message');
-                  flashMessage.style.opacity = '0';
-                  setTimeout(() => {
-                      flashMessage.remove();
-                  }, 500);
-              });
-          });
 
           // Auto-dismiss flash messages after 5 seconds
           setTimeout(() => {

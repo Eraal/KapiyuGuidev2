@@ -188,7 +188,8 @@ def view_inquiry_details(inquiry_id):
     """
     inquiry = Inquiry.query.get_or_404(inquiry_id)
 
-    messages = inquiry.messages.order_by(Inquiry.created_at).all() if hasattr(inquiry, 'messages') else []
+    # Fix: Use proper query instead of trying to sort the InstrumentedList
+    messages = InquiryMessage.query.filter_by(inquiry_id=inquiry_id).order_by(InquiryMessage.created_at).all() if hasattr(inquiry, 'messages') else []
     
     return render_template(
         'admin/inquiry_details_modal.html',

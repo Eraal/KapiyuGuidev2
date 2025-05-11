@@ -117,10 +117,16 @@ def view_inquiry(inquiry_id):
         student_id=student.id
     ).first_or_404()
     
-    # Get all messages for this inquiry
+    # Get latest 6 messages for this inquiry for initial load
     messages = InquiryMessage.query.filter_by(
         inquiry_id=inquiry.id
-    ).order_by(InquiryMessage.created_at).all()
+    ).order_by(desc(InquiryMessage.created_at)).limit(6).all()
+    
+    # Reverse the messages to display in chronological order
+    messages = messages[::-1]
+    
+    # Get total message count for pagination
+    total_messages = InquiryMessage.query.filter_by(inquiry_id=inquiry.id).count()
     
     # Get related inquiries (same office)
     related_inquiries = Inquiry.query.filter(
@@ -157,7 +163,56 @@ def view_inquiry(inquiry_id):
         'student/view_inquiry.html',
         inquiry=inquiry,
         messages=messages,
+        total_messages=total_messages,
         related_inquiries=related_inquiries,
+        unread_notifications_count=unread_notifications_count,
+        notifications=notifications,
+        has_more_messages=(total_messages > 6)
+    )
+
+# Submit inquiry to specific office
+@student_bp.route('/office/<int:office_id>/submit-inquiry')
+@login_required
+@role_required(['student'])
+def submit_inquiry(office_id):
+    """Display a dedicated form for submitting an inquiry to a specific office"""
+    # Get the student record
+    student = Student.query.filter_by(user_id=current_user.id).first_or_404()
+    
+    # Get the office
+    office = Office.query.get_or_404(office_id)
+    
+    # Get concern types for this office
+    concern_types = ConcernType.query.join(OfficeConcernType).filter(
+        OfficeConcernType.office_id == office_id
+    ).all()
+    
+    # Get unread notifications count for navbar
+    unread_notifications_count = Notification.query.filter_by(
+        user_id=current_user.id,
+        is_read=False
+    ).count()
+    
+    # Get notifications for dropdown
+    notifications = Notification.query.filter_by(
+        user_id=current_user.id
+    ).order_by(desc(Notification.created_at)).limit(5).all()
+    
+    # Log this activity
+    log_entry = StudentActivityLog(
+        student_id=student.id,
+        action=f"Viewed submission form for {office.name}",
+        timestamp=datetime.utcnow(),
+        ip_address=request.remote_addr,
+        user_agent=request.user_agent.string
+    )
+    db.session.add(log_entry)
+    db.session.commit()
+    
+    return render_template(
+        'student/submit_inquiry.html',
+        office=office,
+        concern_types=concern_types,
         unread_notifications_count=unread_notifications_count,
         notifications=notifications
     )
@@ -309,6 +364,9 @@ def reply_to_inquiry(inquiry_id):
         # Update inquiry status if it was resolved
         if inquiry.status == 'resolved':
             inquiry.status = 'reopened'
+            
+            # Update the last_activity timestamp for better tracking
+            inquiry.last_activity = datetime.utcnow()
         
         # Handle attachments if any
         if 'attachments' in request.files:
@@ -371,3 +429,66 @@ def reply_to_inquiry(inquiry_id):
         db.session.rollback()
         flash(f'Error sending reply: {str(e)}', 'error')
         return redirect(url_for('student.view_inquiry', inquiry_id=inquiry_id))
+
+@student_bp.route('/api/inquiry/<int:inquiry_id>/messages', methods=['GET'])
+@login_required
+@role_required(['student'])
+def get_older_messages(inquiry_id):
+    """API to fetch older messages for infinite scrolling"""
+    try:
+        # Get the student record
+        student = Student.query.filter_by(user_id=current_user.id).first_or_404()
+        
+        # Get the inquiry and verify ownership
+        inquiry = Inquiry.query.filter_by(
+            id=inquiry_id,
+            student_id=student.id
+        ).first_or_404()
+        
+        # Get pagination parameters
+        before_id = request.args.get('before_id', type=int)
+        limit = request.args.get('limit', 6, type=int)
+        
+        # Query for older messages
+        query = InquiryMessage.query.filter_by(
+            inquiry_id=inquiry.id
+        )
+        
+        # If we have a before_id, only get messages older than that
+        if before_id:
+            oldest_message = InquiryMessage.query.get(before_id)
+            if oldest_message:
+                query = query.filter(InquiryMessage.created_at < oldest_message.created_at)
+        
+        # Get messages in descending order and limit
+        messages = query.order_by(desc(InquiryMessage.created_at)).limit(limit).all()
+        
+        # Reverse the messages to display in chronological order
+        messages = messages[::-1]
+        
+        # Serialize messages data for JSON response
+        messages_data = []
+        for message in messages:
+            sender = User.query.get(message.sender_id)
+            is_student = sender.id == current_user.id
+            
+            messages_data.append({
+                'id': message.id,
+                'content': message.content,
+                'timestamp': message.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'sender_name': sender.get_full_name() if sender else 'Unknown',
+                'is_student': is_student,
+                'status': message.status
+            })
+        
+        return jsonify({
+            'success': True,
+            'messages': messages_data,
+            'has_more': len(messages) >= limit
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error fetching messages: {str(e)}'
+        }), 500

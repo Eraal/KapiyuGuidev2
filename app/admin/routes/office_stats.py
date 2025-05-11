@@ -98,7 +98,7 @@ def view_office_details(office_id):
         'total': Inquiry.query.filter_by(office_id=office_id).count(),
         'pending': Inquiry.query.filter_by(office_id=office_id, status='pending').count(),
         'in_progress': Inquiry.query.filter_by(office_id=office_id, status='in_progress').count(),
-        'completed': Inquiry.query.filter_by(office_id=office_id, status='completed').count(),
+        'resolved': Inquiry.query.filter_by(office_id=office_id, status='resolved').count(),
     }
     
     # Get all office admins

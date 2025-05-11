@@ -192,7 +192,14 @@ KapiyuGuide{% endblock %} {% block extra_head %}
             class="space-y-6 mb-6 max-h-[500px] overflow-y-auto"
             id="messageHistory"
           >
-            {% for message in messages %}
+            {% if has_more_messages %}
+            <div id="load-more-container" class="flex justify-center mb-4">
+              <div class="text-xs text-gray-500" id="scroll-indicator">
+                <i class="fas fa-arrow-up mr-1 animate-bounce"></i>
+                Scroll up to load older messages
+              </div>
+            </div>
+            {% endif %} {% for message in messages %}
             <div
               class="flex {% if message.sender_id == current_user.id %}justify-end{% endif %}"
             >
@@ -361,77 +368,91 @@ KapiyuGuide{% endblock %} {% block extra_head %}
 <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/inquiry-chat.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chat-init.js') }}"></script>
+<script src="{{ url_for('static', filename='js/progressive-chat-loader.js') }}"></script>
 <script>
   document.addEventListener("DOMContentLoaded", function () {
-    // Scroll to bottom of message history
+    // Scroll to bottom of message history on page load
     const messageHistory = document.getElementById("messageHistory");
     if (messageHistory) {
+      // Make sure to scroll to bottom after all images are loaded
       messageHistory.scrollTop = messageHistory.scrollHeight;
+
+      // Add event listener for any images loading to re-scroll once they're done
+      const images = messageHistory.querySelectorAll('img');
+      if (images.length > 0) {
+        images.forEach(img => {
+          img.onload = function() {
+            messageHistory.scrollTop = messageHistory.scrollHeight;
+          };
+        });
+      }
     }
 
     // Handle file attachments preview for replies
     const replyAttachments = document.getElementById("replyAttachments");
     const replyAttachmentPreview = document.getElementById("replyAttachmentPreview");
 
-    replyAttachments.addEventListener("change", function (e) {
-      replyAttachmentPreview.innerHTML = "";
-      const files = Array.from(e.target.files);
+    if (replyAttachments && replyAttachmentPreview) {
+      replyAttachments.addEventListener("change", function (e) {
+        replyAttachmentPreview.innerHTML = "";
+        const files = Array.from(e.target.files);
 
-      // Limit to 3 files
-      if (files.length > 3) {
-        alert("You can only upload up to 3 files.");
-        e.target.value = "";
-        return;
-      }
-
-      files.forEach((file) => {
-        // Check file size (5MB limit)
-        if (file.size > 5 * 1024 * 1024) {
-          alert(`File ${file.name} is too large. Maximum file size is 5MB.`);
+        // Limit to 3 files
+        if (files.length > 3) {
+          alert("You can only upload up to 3 files.");
+          e.target.value = "";
           return;
         }
 
-        const preview = document.createElement("div");
-        preview.className =
-          "bg-gray-100 p-2 rounded-md flex items-center text-sm";
+        files.forEach((file) => {
+          // Check file size (5MB limit)
+          if (file.size > 5 * 1024 * 1024) {
+            alert(`File ${file.name} is too large. Maximum file size is 5MB.`);
+            return;
+          }
 
-        // Preview Icon
-        const icon = document.createElement("i");
-        if (file.type.match("image.*")) {
-          icon.className = "far fa-image text-blue-500 mr-1";
-        } else if (file.type === "application/pdf") {
-          icon.className = "far fa-file-pdf text-red-500 mr-1";
-        } else if (
-          file.type ===
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-          file.type === "application/msword"
-        ) {
-          icon.className = "far fa-file-word text-blue-500 mr-1";
-        } else {
-          icon.className = "far fa-file text-gray-500 mr-1";
-        }
-        preview.appendChild(icon);
+          const preview = document.createElement("div");
+          preview.className =
+            "bg-gray-100 p-2 rounded-md flex items-center text-sm";
 
-        const fileName = document.createElement("span");
-        fileName.textContent =
-          file.name.length > 15
-            ? file.name.substring(0, 15) + "..."
-            : file.name;
-        preview.appendChild(fileName);
+          // Preview Icon
+          const icon = document.createElement("i");
+          if (file.type.match("image.*")) {
+            icon.className = "far fa-image text-blue-500 mr-1";
+          } else if (file.type === "application/pdf") {
+            icon.className = "far fa-file-pdf text-red-500 mr-1";
+          } else if (
+            file.type ===
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+            file.type === "application/msword"
+          ) {
+            icon.className = "far fa-file-word text-blue-500 mr-1";
+          } else {
+            icon.className = "far fa-file text-gray-500 mr-1";
+          }
+          preview.appendChild(icon);
 
-        const removeBtn = document.createElement("button");
-        removeBtn.className = "ml-2 text-red-500 hover:text-red-700";
-        removeBtn.innerHTML = '<i class="fas fa-times"></i>';
-        removeBtn.addEventListener("click", function () {
-          preview.remove();
-          // Note: This doesn't actually remove the file from the input
-          // You would need a more complex solution to truly remove files
+          const fileName = document.createElement("span");
+          fileName.textContent =
+            file.name.length > 15
+              ? file.name.substring(0, 15) + "..."
+              : file.name;
+          preview.appendChild(fileName);
+
+          const removeBtn = document.createElement("button");
+          removeBtn.className = "ml-2 text-red-500 hover:text-red-700";
+          removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+          removeBtn.addEventListener("click", function () {
+            preview.remove();
+            // Note: This doesn't actually remove the file from the input
+            // You would need a more complex solution to truly remove files
+          });
+          preview.appendChild(removeBtn);
+
+          replyAttachmentPreview.appendChild(preview);
         });
-        preview.appendChild(removeBtn);
-
-        replyAttachmentPreview.appendChild(preview);
       });
-    });
+    }
 
     // Initialize the chat manager for real-time features
     if (window.io) {
@@ -450,6 +471,120 @@ KapiyuGuide{% endblock %} {% block extra_head %}
         currentUserName: '{{ current_user.get_full_name() }}',
         currentUserInitials: '{{ current_user.first_name[0] }}{{ current_user.last_name[0] }}'
       });
+
+      // Initialize progressive message loading
+      if ({{ has_more_messages|default('false')|tojson }}) {
+        // Show loading indicator initially
+        const scrollIndicator = document.getElementById('scroll-indicator');
+        if (scrollIndicator) {
+          scrollIndicator.style.display = 'block';
+        }
+
+        // Function to render a message element
+        const renderMessage = (message) => {
+          const isSentByMe = message.sender_id == {{ current_user.id }};
+          const messageElement = document.createElement('div');
+          messageElement.className = `flex ${isSentByMe ? 'justify-end' : ''}`;
+
+          // Format date nicely
+          let formattedDate = 'Unknown date';
+          if (message.timestamp) {
+            const date = new Date(message.timestamp);
+            formattedDate = date.toLocaleString('default', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: 'numeric',
+              hour12: true
+            });
+          }
+
+          // Get sender name or initials
+          let senderInitials = 'UN';
+          if (message.sender_name) {
+            const nameParts = message.sender_name.split(' ');
+            if (nameParts.length > 1) {
+              senderInitials = nameParts[0].charAt(0) + nameParts[nameParts.length - 1].charAt(0);
+            } else {
+              senderInitials = message.sender_name.substring(0, 2);
+            }
+          }
+
+          // Create message HTML
+          messageElement.innerHTML = `
+            <div class="message-bubble p-4 ${isSentByMe ? 'message-sent' : 'message-received'}"
+                data-message-id="${message.id}"
+                data-sender-id="${message.sender_id}">
+              <div class="flex items-center mb-2">
+                ${!isSentByMe ? `
+                  <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white">
+                    ${senderInitials}
+                  </div>
+                  <div class="ml-2">
+                    <div class="text-xs font-semibold">
+                      ${message.sender_name}
+                      ${message.is_student ? '' : '<span class="text-blue-600">(Office Staff)</span>'}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                      ${formattedDate}
+                    </div>
+                  </div>
+                ` : `
+                  <div class="text-right ml-auto">
+                    <div class="text-xs font-semibold">You</div>
+                    <div class="text-xs text-gray-500">
+                      ${formattedDate}
+                    </div>
+                  </div>
+                  <div class="h-8 w-8 rounded-full bg-green-500 ml-2 flex items-center justify-center text-white">
+                    {{ current_user.first_name[0] }}{{ current_user.last_name[0] }}
+                  </div>
+                `}
+              </div>
+              <div class="text-sm">${message.content.replace(/\n/g, '<br>')}</div>
+
+              ${isSentByMe ? `
+              <div class="message-status text-xs text-right mt-1">
+                <span class="status-icon">
+                  <i class="fas ${message.status === 'read' ? 'fa-check-double text-blue-500' :
+                                  message.status === 'delivered' ? 'fa-check-double' : 'fa-check'}"></i>
+                </span>
+                <span class="status-text ml-1">${message.status.charAt(0).toUpperCase() + message.status.slice(1)}</span>
+              </div>
+              ` : ''}
+            </div>
+          `;
+
+          return messageElement;
+        };
+
+        // Initialize the progressive chat loader
+        const chatLoader = new ProgressiveChatLoader({
+          messageContainer: messageHistory,
+          inquiryId: {{ inquiry.id }},
+          renderMessage: renderMessage,
+          apiEndpoint: "{{ url_for('student.get_older_messages', inquiry_id=inquiry.id) }}",
+          loadThreshold: 150,
+          batchSize: 6
+        });
+
+        // Hide scroll indicator after first load
+        chatLoader.onLoadComplete = function(messages) {
+          const indicator = document.getElementById('scroll-indicator');
+          if (indicator) {
+            indicator.style.display = 'none';
+          }
+
+          // If we've loaded all messages, remove the indicator completely
+          if (!chatLoader.hasMoreMessages) {
+            const loadMoreContainer = document.getElementById('load-more-container');
+            if (loadMoreContainer) {
+              loadMoreContainer.remove();
+            }
+          }
+        };
+      }
     }
   });
 </script>

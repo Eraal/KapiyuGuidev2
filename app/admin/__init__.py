@@ -6,4 +6,4 @@ from .routes import dashboard, adminprofile, student_management, audit_logs
 from .routes import office_stats, admin_announcement, admin_inquiries
 from .routes import account_settings, add_office, manage_office_admins, edit_office
 from .routes import locked_account_history, admin_detail, manage_concern_types
-from .routes import edit_admin, admin_counseling
+from .routes import edit_admin, admin_counseling, manage_admin

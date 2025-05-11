@@ -331,6 +331,23 @@
             </div>
           </div>
 
+          {% if current_user.role == 'super_admin' %}
+          <a
+            href="{{ url_for('admin.manage_admins') }}"
+            class="sidebar-item flex items-center px-4 py-3 {% if request.endpoint == 'admin.manage_admins' %}active-nav text-blue-800 font-semibold{% else %}text-gray-700{% endif %}"
+          >
+            <div class="nav-icon mr-3">
+              <i class="fas fa-user-shield"></i>
+            </div>
+            <span>Manage Admins</span>
+            {% if request.endpoint == 'admin.manage_admins' %}
+            <span class="ml-auto">
+              <i class="fas fa-circle text-blue-800 text-xs"></i>
+            </span>
+            {% endif %}
+          </a>
+          {% endif %}
+
           <a
             href="{{ url_for('admin.student_manage') }}"
             class="sidebar-item flex items-center px-4 py-3 {% if request.endpoint == 'admin.student_manage' %}active-nav text-blue-800 font-semibold{% else %}text-gray-700{% endif %}"

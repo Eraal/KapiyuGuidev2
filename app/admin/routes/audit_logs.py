@@ -22,18 +22,33 @@ def audit_logs():
         
     filter_type = request.args.get('filter_type', 'all')
     search_query = request.args.get('search', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    role = request.args.get('role', '')
+    action = request.args.get('action', '')
+    status = request.args.get('status', '')
+    
+    # Create a dictionary of filter params to pass to view functions
+    filter_params = {
+        'search': search_query,
+        'date_from': date_from, 
+        'date_to': date_to,
+        'role': role,
+        'action': action,
+        'status': status
+    }
     
     if filter_type == 'student':
-        return handle_student_logs(search_query)
+        return handle_student_logs(filter_params)
     elif filter_type == 'office':
-        return handle_office_logs(search_query)
+        return handle_office_logs(filter_params)
     elif filter_type == 'superadmin':
-        return handle_superadmin_logs(search_query)
+        return handle_superadmin_logs(filter_params)
     else:  # 'all' or any other value
-        return handle_all_logs(search_query)
+        return handle_all_logs(filter_params)
 
 
-def handle_student_logs(search_query):
+def handle_student_logs(filter_params):
     """Handle student activity logs filtering and display"""
     student_logs_query = db.session.query(
         StudentActivityLog, Student, User
@@ -43,15 +58,21 @@ def handle_student_logs(search_query):
         User, Student.user_id == User.id
     ).order_by(StudentActivityLog.timestamp.desc())
     
-    if search_query:
+    if filter_params['search']:
         student_logs_query = student_logs_query.filter(
             or_(
-                User.first_name.ilike(f'%{search_query}%'),
-                User.last_name.ilike(f'%{search_query}%'),
-                User.email.ilike(f'%{search_query}%'),
-                StudentActivityLog.action.ilike(f'%{search_query}%')
+                User.first_name.ilike(f"%{filter_params['search']}%"),
+                User.last_name.ilike(f"%{filter_params['search']}%"),
+                User.email.ilike(f"%{filter_params['search']}%"),
+                StudentActivityLog.action.ilike(f"%{filter_params['search']}%")
             )
         )
+    
+    if filter_params['date_from']:
+        student_logs_query = student_logs_query.filter(StudentActivityLog.timestamp >= datetime.strptime(filter_params['date_from'], '%Y-%m-%d'))
+    
+    if filter_params['date_to']:
+        student_logs_query = student_logs_query.filter(StudentActivityLog.timestamp <= datetime.strptime(filter_params['date_to'] + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
     
     students_query = db.session.query(
         User,
@@ -93,11 +114,11 @@ def handle_student_logs(search_query):
                           student_logs=formatted_logs,
                           pagination=paginated_logs,
                           filter_type='student',
-                          search_query=search_query,
+                          search_query=filter_params['search'],
                           view_type='student')
 
 
-def handle_office_logs(search_query):
+def handle_office_logs(filter_params):
     """Handle office login logs filtering and display"""
     office_logs_query = db.session.query(
         OfficeLoginLog, OfficeAdmin, User, Office
@@ -109,15 +130,21 @@ def handle_office_logs(search_query):
         Office, OfficeAdmin.office_id == Office.id
     ).order_by(OfficeLoginLog.login_time.desc())
     
-    if search_query:
+    if filter_params['search']:
         office_logs_query = office_logs_query.filter(
             or_(
-                User.first_name.ilike(f'%{search_query}%'),
-                User.last_name.ilike(f'%{search_query}%'),
-                User.email.ilike(f'%{search_query}%'),
-                Office.name.ilike(f'%{search_query}%')
+                User.first_name.ilike(f"%{filter_params['search']}%"),
+                User.last_name.ilike(f"%{filter_params['search']}%"),
+                User.email.ilike(f"%{filter_params['search']}%"),
+                Office.name.ilike(f"%{filter_params['search']}%")
             )
         )
+    
+    if filter_params['date_from']:
+        office_logs_query = office_logs_query.filter(OfficeLoginLog.login_time >= datetime.strptime(filter_params['date_from'], '%Y-%m-%d'))
+    
+    if filter_params['date_to']:
+        office_logs_query = office_logs_query.filter(OfficeLoginLog.login_time <= datetime.strptime(filter_params['date_to'] + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
     
     offices_query = db.session.query(
         Office,
@@ -158,10 +185,10 @@ def handle_office_logs(search_query):
                           office_logs=formatted_logs,
                           pagination=paginated_logs,
                           filter_type='office',
-                          search_query=search_query,
+                          search_query=filter_params['search'],
                           view_type='office')
 
-def handle_superadmin_logs(search_query):
+def handle_superadmin_logs(filter_params):
     """Handle super admin activity logs filtering and display"""
     superadmin_logs_query = db.session.query(
         SuperAdminActivityLog, 
@@ -172,16 +199,22 @@ def handle_superadmin_logs(search_query):
         User, SuperAdminActivityLog.super_admin_id == User.id
     ).order_by(SuperAdminActivityLog.timestamp.desc())
     
-    if search_query:
+    if filter_params['search']:
         superadmin_logs_query = superadmin_logs_query.filter(
             or_(
-                User.first_name.ilike(f'%{search_query}%'),
-                User.last_name.ilike(f'%{search_query}%'),
-                User.email.ilike(f'%{search_query}%'),
-                SuperAdminActivityLog.action.ilike(f'%{search_query}%'),
-                SuperAdminActivityLog.target_type.ilike(f'%{search_query}%')
+                User.first_name.ilike(f"%{filter_params['search']}%"),
+                User.last_name.ilike(f"%{filter_params['search']}%"),
+                User.email.ilike(f"%{filter_params['search']}%"),
+                SuperAdminActivityLog.action.ilike(f"%{filter_params['search']}%"),
+                SuperAdminActivityLog.target_type.ilike(f"%{filter_params['search']}%")
             )
         )
+    
+    if filter_params['date_from']:
+        superadmin_logs_query = superadmin_logs_query.filter(SuperAdminActivityLog.timestamp >= datetime.strptime(filter_params['date_from'], '%Y-%m-%d'))
+    
+    if filter_params['date_to']:
+        superadmin_logs_query = superadmin_logs_query.filter(SuperAdminActivityLog.timestamp <= datetime.strptime(filter_params['date_to'] + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
     
     super_admins_query = db.session.query(
         User,
@@ -220,11 +253,11 @@ def handle_superadmin_logs(search_query):
                           superadmin_logs=formatted_logs,
                           pagination=paginated_logs,
                           filter_type='superadmin',
-                          search_query=search_query,
+                          search_query=filter_params['search'],
                           view_type='superadmin')
 
 
-def handle_all_logs(search_query):
+def handle_all_logs(filter_params):
     """Handle all audit logs filtering and display"""
     audit_logs_query = db.session.query(
         AuditLog,
@@ -236,16 +269,22 @@ def handle_all_logs(search_query):
         User, AuditLog.actor_id == User.id
     ).order_by(AuditLog.timestamp.desc())
     
-    if search_query:
+    if filter_params['search']:
         audit_logs_query = audit_logs_query.filter(
             or_(
-                User.first_name.ilike(f'%{search_query}%'),
-                User.last_name.ilike(f'%{search_query}%'),
-                User.email.ilike(f'%{search_query}%'),
-                AuditLog.action.ilike(f'%{search_query}%'),
-                AuditLog.target_type.ilike(f'%{search_query}%')
+                User.first_name.ilike(f"%{filter_params['search']}%"),
+                User.last_name.ilike(f"%{filter_params['search']}%"),
+                User.email.ilike(f"%{filter_params['search']}%"),
+                AuditLog.action.ilike(f"%{filter_params['search']}%"),
+                AuditLog.target_type.ilike(f"%{filter_params['search']}%")
             )
         )
+    
+    if filter_params['date_from']:
+        audit_logs_query = audit_logs_query.filter(AuditLog.timestamp >= datetime.strptime(filter_params['date_from'], '%Y-%m-%d'))
+    
+    if filter_params['date_to']:
+        audit_logs_query = audit_logs_query.filter(AuditLog.timestamp <= datetime.strptime(filter_params['date_to'] + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
     
     # Pagination
     page = request.args.get('page', 1, type=int)
@@ -272,7 +311,7 @@ def handle_all_logs(search_query):
                           audit_logs=formatted_logs,
                           pagination=paginated_logs,
                           filter_type='all',
-                          search_query=search_query,
+                          search_query=filter_params['search'],
                           view_type='all')
 
 
@@ -287,7 +326,17 @@ def export_logs():
     export_format = request.args.get('format', 'csv')
     log_type = request.args.get('type', 'all')
     
-    logs = get_logs_based_on_type_and_filters(log_type)
+    # Get all filter parameters to pass to the log retrieval function
+    filter_params = {
+        'search': request.args.get('search', ''),
+        'date_from': request.args.get('date_from', ''),
+        'date_to': request.args.get('date_to', ''),
+        'role': request.args.get('role', ''),
+        'status': request.args.get('status', ''),
+        'action': request.args.get('action', '')
+    }
+    
+    logs = get_logs_based_on_type_and_filters(log_type, filter_params)
     
     if export_format == 'csv':
         return export_logs_csv(logs, log_type)
@@ -300,12 +349,8 @@ def export_logs():
         return redirect(url_for('admin.audit_logs', filter_type=log_type))
 
 
-def get_logs_based_on_type_and_filters(log_type):
+def get_logs_based_on_type_and_filters(log_type, filter_params):
     """Get logs based on type and applied filters."""
-    date_from = request.args.get('date_from')
-    date_to = request.args.get('date_to')
-    search_query = request.args.get('search', '')
-    
     if log_type == 'student':
         query = db.session.query(
             StudentActivityLog, Student, User
@@ -315,21 +360,21 @@ def get_logs_based_on_type_and_filters(log_type):
             User, Student.user_id == User.id
         )
         
-        if search_query:
+        if filter_params['search']:
             query = query.filter(
                 or_(
-                    User.first_name.ilike(f'%{search_query}%'),
-                    User.last_name.ilike(f'%{search_query}%'),
-                    User.email.ilike(f'%{search_query}%'),
-                    StudentActivityLog.action.ilike(f'%{search_query}%')
+                    User.first_name.ilike(f'%{filter_params["search"]}%'),
+                    User.last_name.ilike(f'%{filter_params["search"]}%'),
+                    User.email.ilike(f'%{filter_params["search"]}%'),
+                    StudentActivityLog.action.ilike(f'%{filter_params["search"]}%')
                 )
             )
             
-        if date_from:
-            query = query.filter(StudentActivityLog.timestamp >= datetime.strptime(date_from, '%Y-%m-%d'))
+        if filter_params['date_from']:
+            query = query.filter(StudentActivityLog.timestamp >= datetime.strptime(filter_params['date_from'], '%Y-%m-%d'))
         
-        if date_to:
-            query = query.filter(StudentActivityLog.timestamp <= datetime.strptime(date_to + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
+        if filter_params['date_to']:
+            query = query.filter(StudentActivityLog.timestamp <= datetime.strptime(filter_params['date_to'] + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
             
         return query.order_by(StudentActivityLog.timestamp.desc()).all()
         
@@ -344,21 +389,21 @@ def get_logs_based_on_type_and_filters(log_type):
             Office, OfficeAdmin.office_id == Office.id
         )
         
-        if search_query:
+        if filter_params['search']:
             query = query.filter(
                 or_(
-                    User.first_name.ilike(f'%{search_query}%'),
-                    User.last_name.ilike(f'%{search_query}%'),
-                    User.email.ilike(f'%{search_query}%'),
-                    Office.name.ilike(f'%{search_query}%')
+                    User.first_name.ilike(f'%{filter_params["search"]}%'),
+                    User.last_name.ilike(f'%{filter_params["search"]}%'),
+                    User.email.ilike(f'%{filter_params["search"]}%'),
+                    Office.name.ilike(f'%{filter_params["search"]}%')
                 )
             )
             
-        if date_from:
-            query = query.filter(OfficeLoginLog.login_time >= datetime.strptime(date_from, '%Y-%m-%d'))
+        if filter_params['date_from']:
+            query = query.filter(OfficeLoginLog.login_time >= datetime.strptime(filter_params['date_from'], '%Y-%m-%d'))
         
-        if date_to:
-            query = query.filter(OfficeLoginLog.login_time <= datetime.strptime(date_to + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
+        if filter_params['date_to']:
+            query = query.filter(OfficeLoginLog.login_time <= datetime.strptime(filter_params['date_to'] + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
             
         return query.order_by(OfficeLoginLog.login_time.desc()).all()
         
@@ -369,22 +414,22 @@ def get_logs_based_on_type_and_filters(log_type):
             User, SuperAdminActivityLog.super_admin_id == User.id
         )
         
-        if search_query:
+        if filter_params['search']:
             query = query.filter(
                 or_(
-                    User.first_name.ilike(f'%{search_query}%'),
-                    User.last_name.ilike(f'%{search_query}%'),
-                    User.email.ilike(f'%{search_query}%'),
-                    SuperAdminActivityLog.action.ilike(f'%{search_query}%'),
-                    SuperAdminActivityLog.target_type.ilike(f'%{search_query}%')
+                    User.first_name.ilike(f'%{filter_params["search"]}%'),
+                    User.last_name.ilike(f'%{filter_params["search"]}%'),
+                    User.email.ilike(f'%{filter_params["search"]}%'),
+                    SuperAdminActivityLog.action.ilike(f'%{filter_params["search"]}%'),
+                    SuperAdminActivityLog.target_type.ilike(f'%{filter_params["search"]}%')
                 )
             )
             
-        if date_from:
-            query = query.filter(SuperAdminActivityLog.timestamp >= datetime.strptime(date_from, '%Y-%m-%d'))
+        if filter_params['date_from']:
+            query = query.filter(SuperAdminActivityLog.timestamp >= datetime.strptime(filter_params['date_from'], '%Y-%m-%d'))
         
-        if date_to:
-            query = query.filter(SuperAdminActivityLog.timestamp <= datetime.strptime(date_to + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
+        if filter_params['date_to']:
+            query = query.filter(SuperAdminActivityLog.timestamp <= datetime.strptime(filter_params['date_to'] + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
             
         return query.order_by(SuperAdminActivityLog.timestamp.desc()).all()
         
@@ -395,22 +440,22 @@ def get_logs_based_on_type_and_filters(log_type):
             User, AuditLog.actor_id == User.id
         )
         
-        if search_query:
+        if filter_params['search']:
             query = query.filter(
                 or_(
-                    User.first_name.ilike(f'%{search_query}%') if User else False,
-                    User.last_name.ilike(f'%{search_query}%') if User else False,
-                    User.email.ilike(f'%{search_query}%') if User else False,
-                    AuditLog.action.ilike(f'%{search_query}%'),
-                    AuditLog.target_type.ilike(f'%{search_query}%')
+                    User.first_name.ilike(f'%{filter_params["search"]}%') if User else False,
+                    User.last_name.ilike(f'%{filter_params["search"]}%') if User else False,
+                    User.email.ilike(f'%{filter_params["search"]}%') if User else False,
+                    AuditLog.action.ilike(f'%{filter_params["search"]}%'),
+                    AuditLog.target_type.ilike(f'%{filter_params["search"]}%')
                 )
             )
             
-        if date_from:
-            query = query.filter(AuditLog.timestamp >= datetime.strptime(date_from, '%Y-%m-%d'))
+        if filter_params['date_from']:
+            query = query.filter(AuditLog.timestamp >= datetime.strptime(filter_params['date_from'], '%Y-%m-%d'))
         
-        if date_to:
-            query = query.filter(AuditLog.timestamp <= datetime.strptime(date_to + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
+        if filter_params['date_to']:
+            query = query.filter(AuditLog.timestamp <= datetime.strptime(filter_params['date_to'] + ' 23:59:59', '%Y-%m-%d %H:%M:%S'))
             
         return query.order_by(AuditLog.timestamp.desc()).all()
 

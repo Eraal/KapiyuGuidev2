@@ -138,6 +138,17 @@ def view_inquiry(inquiry_id):
     # Fetch the inquiry and verify it belongs to this office
     inquiry = Inquiry.query.filter_by(id=inquiry_id, office_id=office_admin.office_id).first_or_404()
     
+    # Get latest 6 messages for this inquiry for initial load
+    messages = InquiryMessage.query.filter_by(
+        inquiry_id=inquiry.id
+    ).order_by(desc(InquiryMessage.created_at)).limit(6).all()
+    
+    # Reverse the messages to display in chronological order
+    messages = messages[::-1]
+    
+    # Get total message count for pagination
+    total_messages = InquiryMessage.query.filter_by(inquiry_id=inquiry.id).count()
+    
     # Get count of pending inquiries for navbar badge
     pending_inquiries_count = Inquiry.query.filter_by(
         office_id=office_admin.office_id,
@@ -179,10 +190,13 @@ def view_inquiry(inquiry_id):
     return render_template(
         'office/view_inquiry.html',
         inquiry=inquiry,
+        messages=messages,
+        total_messages=total_messages,
         unread_notifications_count=unread_notifications_count,
         notifications=notifications,
         pending_inquiries_count=pending_inquiries_count,
-        upcoming_sessions_count=upcoming_sessions_count
+        upcoming_sessions_count=upcoming_sessions_count,
+        has_more_messages=(total_messages > 6)
     )
 
 
@@ -382,3 +396,75 @@ def reply_to_inquiry(inquiry_id):
         flash(f"Error sending reply: {str(e)}", "error")
     
     return redirect(url_for('office.view_inquiry', inquiry_id=inquiry_id))
+
+
+@office_bp.route('/api/inquiry/<int:inquiry_id>/messages', methods=['GET'])
+@login_required
+@role_required(['office_admin'])
+def get_older_messages(inquiry_id):
+    """API to fetch older messages for infinite scrolling in chat view"""
+    try:
+        # Get the current office admin's office
+        office_admin = OfficeAdmin.query.filter_by(user_id=current_user.id).first()
+        if not office_admin:
+            return jsonify({'success': False, 'message': 'Office admin not found'}), 403
+        
+        # Fetch the inquiry and verify it belongs to this office
+        inquiry = Inquiry.query.filter_by(id=inquiry_id, office_id=office_admin.office_id).first()
+        if not inquiry:
+            return jsonify({'success': False, 'message': 'Inquiry not found or access denied'}), 404
+        
+        # Get pagination parameters
+        before_id = request.args.get('before_id', type=int)
+        limit = request.args.get('limit', 6, type=int)
+        
+        # Query for older messages
+        query = InquiryMessage.query.filter_by(
+            inquiry_id=inquiry.id
+        )
+        
+        # If we have a before_id, only get messages older than that
+        if before_id:
+            oldest_message = InquiryMessage.query.get(before_id)
+            if oldest_message:
+                query = query.filter(InquiryMessage.created_at < oldest_message.created_at)
+        
+        # Get messages in descending order and limit
+        messages = query.order_by(desc(InquiryMessage.created_at)).limit(limit).all()
+        
+        # Reverse the messages to display in chronological order
+        messages = messages[::-1]
+        
+        # Mark any unread messages as read
+        for message in messages:
+            if message.sender_id != current_user.id and not message.read_at:
+                message.read_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        # Serialize messages data for JSON response
+        messages_data = []
+        for message in messages:
+            sender = User.query.get(message.sender_id)
+            is_student = sender and sender.role == 'student'
+            
+            messages_data.append({
+                'id': message.id,
+                'content': message.content,
+                'timestamp': message.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'sender_name': sender.get_full_name() if sender else 'Unknown',
+                'is_student': is_student,
+                'status': message.status
+            })
+        
+        return jsonify({
+            'success': True,
+            'messages': messages_data,
+            'has_more': len(messages) >= limit
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error fetching messages: {str(e)}'
+        }), 500

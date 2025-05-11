@@ -62,6 +62,128 @@ def init_socketio():
                 'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
             }, room=f"office_{office_id}")
     
+    @socketio.on('staff_status')
+    def handle_staff_status(data):
+        """Handle staff status updates from heartbeat and user activity"""
+        if not current_user.is_authenticated or current_user.role != 'office_admin':
+            return
+            
+        user_id = data.get('user_id')
+        office_id = data.get('office_id')
+        status = data.get('status', 'online')
+        timestamp = data.get('timestamp', datetime.utcnow().timestamp())
+        
+        # Convert timestamp if it's in milliseconds
+        if timestamp > 1e10:  # Likely a JS timestamp (milliseconds)
+            timestamp = timestamp / 1000
+        
+        # Convert to datetime
+        status_time = datetime.fromtimestamp(timestamp)
+        
+        # Validate user
+        if user_id != current_user.id:
+            return  # Security check - users can only update their own status
+        
+        # Update user in database
+        user = current_user
+        user.is_online = status != 'offline'
+        user.last_activity = status_time
+        db.session.commit()
+        
+        # Broadcast to office room
+        emit('staff_status_update', {
+            'user_id': user_id,
+            'user_name': user.get_full_name(),
+            'office_id': office_id,
+            'status': status,
+            'timestamp': status_time.strftime('%Y-%m-%d %H:%M:%S'),
+        }, room=f"office_{office_id}")
+    
+    # Handle student messages
+    @socketio.on('student_message_sent')
+    def handle_student_message(data):
+        """Handle when a student sends a message to the office"""
+        # Debug log to check authentication status
+        if not current_user.is_authenticated:
+            print("handle_student_message: current_user is not authenticated!")
+            return
+        
+        # Ensure that the sender is a student
+        if current_user.role != 'student':
+            print("handle_student_message: non-student attempted to send a student message.")
+            return
+
+        inquiry_id = data.get('inquiry_id')
+        message_id = data.get('message_id')
+        
+        if not inquiry_id or not message_id:
+            print(f"handle_student_message: missing required data - inquiry_id: {inquiry_id}, message_id: {message_id}")
+            return
+        
+        # Get the inquiry
+        inquiry = Inquiry.query.get(inquiry_id)
+        if not inquiry:
+            print(f"handle_student_message: inquiry not found with ID {inquiry_id}")
+            return
+            
+        # Get the message - if it exists in the database already
+        message = InquiryMessage.query.get(message_id)
+        content = data.get('content', '')
+        sender_name = data.get('sender_name', '')
+        
+        if message:
+            # Mark message as delivered
+            message.status = 'delivered'
+            message.delivered_at = datetime.utcnow()
+            db.session.commit()
+            
+            # Use message data from database
+            content = message.content
+            sender_name = message.sender.get_full_name() if message.sender else "Student"
+            timestamp = message.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            # Use data provided in the event directly
+            sender_name = current_user.get_full_name() if current_user else sender_name
+            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Debug log for message delivery attempt
+        print(f"Sending student message to office_{inquiry.office_id} room. Message ID: {message_id}")
+        
+        # Forward to all office admins in this office
+        emit('new_message', {
+            'inquiry_id': inquiry_id,
+            'message_id': message_id,
+            'sender_id': current_user.id,
+            'sender_name': current_user.get_full_name(),
+            'content': content,
+            'timestamp': timestamp,
+            'status': 'delivered',
+            'is_student': True
+        }, room=f"office_{inquiry.office_id}")
+        
+        # Also emit to the inquiry-specific room for other admins viewing the same inquiry
+        emit('new_message', {
+            'inquiry_id': inquiry_id,
+            'message_id': message_id,
+            'sender_id': current_user.id,
+            'sender_name': current_user.get_full_name(),
+            'content': content,
+            'timestamp': timestamp,
+            'status': 'delivered',
+            'is_student': True
+        }, room=f"inquiry_{inquiry.id}")
+        
+        # Also emit a sent confirmation back to the student if this is coming from a student
+        emit('message_status_update', {
+            'inquiry_id': inquiry_id,
+            'message_id': message_id,
+            'status': 'delivered',
+            'timestamp': timestamp
+        }, room=f"user_{current_user.id}")
+        
+        # Log successful message delivery attempt
+        print(f"Student message delivery attempt completed for message {message_id} to office {inquiry.office_id}")
+    
     # New chat message handlers for office admins
     @socketio.on('chat_message_sent')
     def handle_chat_message_sent(data):
@@ -100,7 +222,6 @@ def init_socketio():
     
     @socketio.on('chat_message_delivered')
     def handle_chat_message_delivered(data):
-        """Handle when a chat message is delivered to recipient"""
         if not current_user.is_authenticated:
             return
         
@@ -148,22 +269,67 @@ def init_socketio():
     
     @socketio.on('typing_indicator')
     def on_typing(data):
-        """Handle typing indicators for office admins"""
+        """Handle typing indicators for both office admins and students"""
+        if not current_user.is_authenticated:
+            return
+            
+        inquiry_id = data.get('inquiry_id')
+        is_typing = data.get('is_typing', False)
+        
+        if current_user.role == 'office_admin':
+            # Office admin typing, notify student
+            student_id = data.get('student_id')
+            if student_id and inquiry_id:
+                emit('user_typing', {
+                    'inquiry_id': inquiry_id,
+                    'user_id': current_user.id,
+                    'user_name': current_user.get_full_name(),
+                    'is_typing': is_typing
+                }, room=f'user_{student_id}')
+        
+        elif current_user.role == 'student':
+            # Student typing, notify office admin
+            office_admin_id = data.get('office_admin_id')
+            if office_admin_id and inquiry_id:
+                # Get the inquiry to find the office
+                inquiry = Inquiry.query.get(inquiry_id)
+                if inquiry:
+                    # Send to specific office admin if provided
+                    emit('user_typing', {
+                        'inquiry_id': inquiry_id,
+                        'user_id': current_user.id,
+                        'user_name': current_user.get_full_name(),
+                        'is_typing': is_typing
+                    }, room=f'user_{office_admin_id}')
+                    
+                    # Also emit to office room for any admin viewing this inquiry
+                    emit('user_typing', {
+                        'inquiry_id': inquiry_id,
+                        'user_id': current_user.id,
+                        'user_name': current_user.get_full_name(),
+                        'is_typing': is_typing
+                    }, room=f'office_{inquiry.office_id}')
+    
+    @socketio.on('join_inquiry_room')
+    def handle_join_inquiry_room(data):
+        """Handle joining an inquiry-specific room for real-time updates"""
         if not current_user.is_authenticated or current_user.role != 'office_admin':
             return
             
         inquiry_id = data.get('inquiry_id')
-        student_id = data.get('student_id')
-        is_typing = data.get('is_typing', False)
+        if not inquiry_id:
+            return
+            
+        # Join inquiry-specific room
+        inquiry_room = f"inquiry_{inquiry_id}"
+        join_room(inquiry_room)
+        print(f"Office admin {current_user.get_full_name()} joined {inquiry_room}")
         
-        if student_id and inquiry_id:
-            # Office admin typing, notify student
-            emit('user_typing', {
-                'inquiry_id': inquiry_id,
-                'user_id': current_user.id,
-                'user_name': current_user.get_full_name(),
-                'is_typing': is_typing
-            }, room=f'student_{student_id}')
+        # Acknowledge join
+        emit('joined_inquiry_room', {
+            'inquiry_id': inquiry_id,
+            'success': True
+        })
 
 def emit_new_inquiry_notification(inquiry):
     """
