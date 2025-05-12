@@ -570,56 +570,100 @@ class OfficeSocketManager extends BaseSocketManager {
      */
     _handleNewMessage(data) {
         // Only proceed if the message is related to our office
-        if (!data || !data.inquiry_id) return;
+        if (!data || !data.inquiry_id) {
+            console.warn('Invalid message data received:', data);
+            return;
+        }
+        
+        console.log('Processing new message:', data);
 
-        // Show notification if we're not on the inquiry detail page
-        if (!window.location.pathname.includes(`/inquiry/${data.inquiry_id}`)) {
+        // Check if we're on an inquiry detail page
+        const isDetailPage = window.location.pathname.includes(`/inquiry/`);
+        const isSpecificInquiryPage = window.location.pathname.includes(`/inquiry/${data.inquiry_id}`);
+        
+        if (!isDetailPage) {
             this._showNotification('New Student Message',
                 `${data.sender_name || 'Student'} sent a new message in Inquiry #${data.inquiry_id}`,
                 'info');
             this._playNotificationSound();
+        } else {
+            console.log('On inquiry detail page, checking if this is for the current inquiry...');
         }
 
-        // If we're on the inquiry detail page for this inquiry, add the message to the UI
-        const chatContainer = document.querySelector(`.chat-container[data-inquiry-id="${data.inquiry_id}"]`);
-        if (chatContainer) {
-            // Find or create the chat messages container
-            const messagesContainer = chatContainer.querySelector('.chat-messages') || chatContainer;
-
-            // Create a new message element
-            const messageElement = document.createElement('div');
-            messageElement.id = `message-${data.message_id}`;
-            messageElement.className = 'student-message flex flex-col mb-4';
-            messageElement.dataset.timestamp = data.timestamp;
-
-            // Format the timestamp
-            const timestamp = new Date(data.timestamp);
-            const formattedTime = timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-            // Set the HTML content
-            messageElement.innerHTML = `
-                <div class="student-bubble bg-blue-100 text-blue-800 p-3 rounded-lg max-w-3/4 shadow">
-                    <p>${data.content}</p>
-                </div>
-                <div class="flex justify-start items-center mt-1">
-                    <span class="text-xs text-gray-500">${formattedTime}</span>
-                    <span class="text-xs text-gray-500 ml-2">${data.sender_name || 'Student'}</span>
-                </div>
-            `;
-
+        // If we're on the inquiry detail page, try multiple ways to find the chat container
+        let messageContainer = null;
+        
+        // Try the most direct method - find the message history element
+        messageContainer = document.getElementById('messageHistory');
+        
+        // If not found, try to find it by data attribute
+        if (!messageContainer) {
+            // First try with main container that has inquiry ID
+            const mainContainer = document.querySelector(`[data-inquiry-id="${data.inquiry_id}"][data-chat-container="true"]`) || 
+                                document.querySelector(`[data-inquiry-id="${data.inquiry_id}"]`);
+            
+            if (mainContainer) {
+                console.log('Found main container with matching inquiry ID:', mainContainer);
+                // Look for messageHistory inside this container
+                messageContainer = mainContainer.querySelector('#messageHistory');
+            }
+        }
+        
+        // If still not found, try additional selectors
+        if (!messageContainer && isDetailPage) {
+            console.log('Trying alternative methods to find message container');
+            
+            // Try other common message container selectors
+            const possibleContainers = [
+                document.querySelector('.chat-messages'),
+                document.querySelector('.message-container'),
+                document.querySelector('#chat-messages'),
+                document.querySelector('.messages-wrapper')
+            ];
+            
+            // Use the first valid container found
+            messageContainer = possibleContainers.find(container => container !== null);
+        }
+        
+        console.log('Message container found:', !!messageContainer, messageContainer);
+        
+        if (messageContainer) {
+            // Create and append a new message element
+            const messageElement = this._createMessageElement(data);
+            
             // Add to the messages container
-            messagesContainer.appendChild(messageElement);
+            messageContainer.appendChild(messageElement);
+            console.log('Message element appended:', messageElement);
 
             // Scroll to the bottom of the container
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            messageContainer.scrollTop = messageContainer.scrollHeight;
 
             // Update status in database via API
             this._updateMessageStatus(data.message_id, 'delivered');
+
+            // Play notification sound for current inquiry
+            if (isSpecificInquiryPage) {
+                this._playNotificationSound();
+            }
+        } else if (isDetailPage) {
+            console.warn('We appear to be on the detail page but could not find any suitable message container');
+            
+            // If this is specifically for the current inquiry and we still can't find a container
+            // Try to refresh the page as a last resort if this is the specific inquiry page
+            if (isSpecificInquiryPage) {
+                console.log('This message is for the current inquiry. Showing notification instead.');
+                this._showNotification('New Message Received', 
+                    `${data.sender_name || 'Student'} sent: ${data.content.substring(0, 50)}${data.content.length > 50 ? '...' : ''}`, 
+                    'info');
+                this._playNotificationSound();
+            }
         }
 
         // If we're on the inquiries list page, update the UI to show new message
         const inquiryRow = document.getElementById(`inquiry-${data.inquiry_id}`);
         if (inquiryRow) {
+            console.log('Found inquiry row, updating indicator');
+            
             // Highlight row
             inquiryRow.classList.add('bg-blue-50');
             setTimeout(() => {
@@ -635,11 +679,13 @@ class OfficeSocketManager extends BaseSocketManager {
                     msgIndicator.className = 'new-message-indicator bg-red-500 text-white text-xs rounded-full px-2 py-1 ml-2';
                     msgIndicator.textContent = '1';
                     actionsCell.appendChild(msgIndicator);
+                    console.log('Created new message indicator');
                 }
             } else {
                 // Increment existing counter
                 const count = parseInt(msgIndicator.textContent) || 0;
                 msgIndicator.textContent = count + 1;
+                console.log('Updated message indicator count to', count + 1);
             }
         }
     }
@@ -655,5 +701,136 @@ class OfficeSocketManager extends BaseSocketManager {
             message_id: messageId,
             status: status
         });
+    }
+
+    /**
+     * Create a new message element with the proper styling
+     * @param {Object} message - Message data from server
+     * @returns {HTMLElement} - The message element
+     */
+    _createMessageElement(message) {
+        const isSentByMe = message.sender_id == this._userId;
+        const messageElement = document.createElement('div');
+        messageElement.className = `flex ${isSentByMe ? 'justify-end' : ''}`;
+        
+        // Format date nicely
+        let formattedDate = 'Unknown date';
+        if (message.timestamp) {
+            const date = new Date(message.timestamp);
+            formattedDate = date.toLocaleString('default', { 
+                month: 'short', 
+                day: 'numeric', 
+                year: 'numeric', 
+                hour: 'numeric', 
+                minute: 'numeric', 
+                hour12: true 
+            });
+        }
+        
+        // Get sender initials for avatar
+        let senderInitials = 'UN';
+        if (message.sender_name) {
+            const nameParts = message.sender_name.split(' ');
+            if (nameParts.length > 1) {
+                senderInitials = nameParts[0].charAt(0) + nameParts[nameParts.length - 1].charAt(0);
+            } else {
+                senderInitials = message.sender_name.substring(0, 2);
+            }
+        }
+        
+        // Create message HTML that matches the template format exactly
+        messageElement.innerHTML = `
+            <div class="message-bubble p-4 ${isSentByMe ? 'message-sent' : 'message-received'}"
+                data-message-id="${message.message_id || message.id}"
+                data-sender-id="${message.sender_id}">
+              <div class="flex items-center mb-2">
+                ${!isSentByMe ? `
+                  <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white">
+                    ${senderInitials}
+                  </div>
+                  <div class="ml-2">
+                    <div class="text-xs font-semibold">
+                      ${message.sender_name || 'Unknown'}
+                      ${message.is_student ? '<span class="text-blue-600">(Student)</span>' : ''}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                      ${formattedDate}
+                    </div>
+                  </div>
+                ` : `
+                  <div class="text-right ml-auto">
+                    <div class="text-xs font-semibold">You</div>
+                    <div class="text-xs text-gray-500">
+                      ${formattedDate}
+                    </div>
+                  </div>
+                  <div class="h-8 w-8 rounded-full bg-green-500 ml-2 flex items-center justify-center text-white">
+                    ${document.body.dataset.userInitials || 'ME'}
+                  </div>
+                `}
+              </div>
+              <div class="text-sm">${(message.content || '').replace(/\r\n|\r|\n/g, '<br>')}</div>
+              
+              ${isSentByMe ? `
+              <div class="message-status text-xs text-right mt-1">
+                <span class="status-icon">
+                  <i class="fas ${message.status === 'read' ? 'fa-check-double text-green-500' : 
+                                 message.status === 'delivered' ? 'fa-check-double' : 'fa-check'}"></i>
+                </span>
+                <span class="status-text ml-1">${(message.status || 'sent').charAt(0).toUpperCase() + (message.status || 'sent').slice(1)}</span>
+              </div>
+              ` : ''}
+            </div>
+        `;
+        
+        return messageElement;
+    }
+
+    /**
+     * Display a notification to the user
+     * @param {string} title - Notification title
+     * @param {string} message - Notification message
+     * @param {string} type - Notification type (info, success, warning, error)
+     */
+    _showNotification(title, message, type = 'info') {
+        // Create notification element
+        const notificationDiv = document.createElement('div');
+        notificationDiv.className = `fixed bottom-5 right-5 p-4 rounded shadow-lg z-50 
+            ${type === 'error' ? 'bg-red-600' : 
+            type === 'warning' ? 'bg-yellow-600' : 
+            type === 'success' ? 'bg-green-600' : 'bg-blue-600'} text-white`;
+        
+        // Set notification content
+        notificationDiv.innerHTML = `
+            <div class="flex items-center">
+                <div class="mr-3">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                        d="${type === 'error' ? 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' : 
+                        type === 'warning' ? 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' : 
+                        type === 'success' ? 'M5 13l4 4L19 7' : 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h4 class="font-bold">${title}</h4>
+                    <p>${message}</p>
+                </div>
+                <button class="ml-auto" onclick="this.parentNode.parentNode.remove()">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+        `;
+        
+        // Add to DOM
+        document.body.appendChild(notificationDiv);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (notificationDiv.parentNode) {
+                notificationDiv.remove();
+            }
+        }, 5000);
     }
 }

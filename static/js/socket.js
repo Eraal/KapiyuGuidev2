@@ -146,3 +146,44 @@ class SocketManager {
 
 // Make globally available
 window.SocketManager = SocketManager;
+
+class BaseSocketManager {
+    constructor(options = {}) {
+        // Create a SocketManager instance
+        this.socketManager = new SocketManager(options);
+    }
+
+    // Connection methods
+    connect() {
+        this.socketManager.connect();
+    }
+
+    disconnect() {
+        this.socketManager.disconnect();
+    }
+
+    // Event handlers
+    on(event, handler) {
+        this.socketManager.on(event, handler);
+    }
+
+    emit(event, data, callback) {
+        return this.socketManager.emit(event, data, callback);
+    }
+
+    // Connection indicator
+    _updateConnectionIndicator(isConnected) {
+        // Base implementation - can be overridden by subclasses
+        console.log(`Connection status changed: ${isConnected ? 'connected' : 'disconnected'}`);
+    }
+
+    _setupApplicationHandlers() {
+        // [Change] Add chat message handler for bi-directional real-time updates
+        this.on('chat_message', (data) => {
+            console.log('Chat message received:', data);
+            // Dispatch a custom event so that the chat UI can update immediately
+            const event = new CustomEvent('chat:new_message', { detail: data });
+            document.dispatchEvent(event);
+        });
+    }
+}
