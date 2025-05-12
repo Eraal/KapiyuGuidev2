@@ -58,8 +58,36 @@ class StudentSocketManager extends BaseSocketManager {
         // Listen for notification events
         this.on('notification', (data) => {
             if (data.user_id == this._studentId || !data.user_id) {
-                this._showNotification(data.title, data.message, data.type || 'info');
+                // Format the notification title for office replies
+                const isOfficeReply = data.type === 'reply' ||
+                    data.title?.toLowerCase().includes('reply') ||
+                    data.message?.toLowerCase().includes('replied to your inquiry');
+
+                // Get office name from the data or extract from title/message
+                const officeName = data.office_name || this._extractOfficeName(data.title, data.message) || 'Office';
+
+                // Create a more descriptive title for replies
+                const title = isOfficeReply ? `${officeName} replied` : data.title;
+
+                // Show the notification with enhanced data
+                this._showNotification(
+                    title,
+                    data.message,
+                    data.type || 'info',
+                    {
+                        is_reply: isOfficeReply,
+                        office_name: officeName,
+                        inquiry_id: data.inquiry_id
+                    }
+                );
+
                 this._playNotificationSound();
+
+                // Create or update a browser notification if supported and page is not visible
+                this._createBrowserNotification(title, data.message);
+
+                // Update notification count
+                this._updateNotificationCount();
             }
         });
 
@@ -67,8 +95,15 @@ class StudentSocketManager extends BaseSocketManager {
         this.on('inquiry_status_changed', (data) => {
             if (data.student_id == this._studentId) {
                 const statusText = data.status.charAt(0).toUpperCase() + data.status.slice(1);
-                this._showNotification('Inquiry Status Updated',
-                    `Your inquiry #${data.inquiry_id} status changed to ${statusText}`, 'info');
+                this._showNotification(
+                    'Inquiry Status Updated',
+                    `Your inquiry #${data.inquiry_id} status changed to ${statusText}`,
+                    'info',
+                    {
+                        inquiry_id: data.inquiry_id,
+                        office_name: data.office_name
+                    }
+                );
 
                 // Update UI if on inquiries page
                 const inquiryElement = document.getElementById('inquiry-' + data.inquiry_id);
@@ -89,6 +124,43 @@ class StudentSocketManager extends BaseSocketManager {
                         }
                     }
                 }
+
+                // Update notification count
+                this._updateNotificationCount();
+            }
+        });
+
+        // Listen for new messages
+        this.on('new_message', (data) => {
+            // Only handle if it's to this student and from an office admin
+            if (data.student_id == this._studentId && data.from_admin) {
+                const officeName = data.office_name || 'Office Admin';
+                const title = `${officeName} replied`;
+
+                // Create a preview of the message content
+                const messagePreview = data.content && data.content.length > 100
+                    ? data.content.substring(0, 100) + '...'
+                    : data.content;
+
+                this._showNotification(
+                    title,
+                    messagePreview || 'You have a new reply to your inquiry',
+                    'info',
+                    {
+                        is_reply: true,
+                        office_name: officeName,
+                        inquiry_id: data.inquiry_id,
+                        message_id: data.message_id
+                    }
+                );
+
+                this._playNotificationSound();
+
+                // Create browser notification
+                this._createBrowserNotification(title, messagePreview);
+
+                // Update notification count
+                this._updateNotificationCount();
             }
         });
 
@@ -96,6 +168,59 @@ class StudentSocketManager extends BaseSocketManager {
         this.on('admin_typing', (data) => {
             this._handleTypingIndicator(data);
         });
+    }
+
+    // Helper method to extract office name from notification title/message
+    _extractOfficeName(title, message) {
+        // Common office name patterns in notifications
+        const patterns = [
+            /from\s+([A-Za-z\s&]+)\s+office/i,
+            /([A-Za-z\s&]+)\s+office\s+replied/i,
+            /([A-Za-z\s&]+)\s+department\s+replied/i,
+            /([A-Za-z\s&]+)\s+unit\s+replied/i
+        ];
+
+        const textToSearch = `${title || ''} ${message || ''}`;
+
+        for (const pattern of patterns) {
+            const match = textToSearch.match(pattern);
+            if (match && match[1]) {
+                return match[1].trim();
+            }
+        }
+
+        return null;
+    }
+
+    // Create browser notification if supported and page is not visible
+    _createBrowserNotification(title, message) {
+        if ('Notification' in window && document.visibilityState !== 'visible') {
+            // Check if permission is granted
+            if (Notification.permission === 'granted') {
+                // Create notification
+                try {
+                    const notification = new Notification('KapiyuGuide - ' + title, {
+                        body: message,
+                        icon: '/static/images/schoollogo.png'
+                    });
+
+                    // Close after 5 seconds
+                    setTimeout(() => notification.close(), 5000);
+
+                    // Handle notification click - focus the window
+                    notification.onclick = function () {
+                        window.focus();
+                        this.close();
+                    };
+                } catch (e) {
+                    console.warn('Browser notification creation failed:', e);
+                }
+            }
+            // Request permission if not denied
+            else if (Notification.permission !== 'denied') {
+                Notification.requestPermission();
+            }
+        }
     }
 
     /**
@@ -202,6 +327,130 @@ class StudentSocketManager extends BaseSocketManager {
             if (typingTimer) clearTimeout(typingTimer);
             emitTypingStatus(false);
         });
+    }
+
+    /**
+     * Enhanced notification display method with additional metadata
+     * @param {string} title - Notification title
+     * @param {string} message - Notification message
+     * @param {string} type - Notification type (info, success, warning, error)
+     * @param {Object} metadata - Additional notification metadata
+     */
+    _showNotification(title, message, type = 'info', metadata = {}) {
+        // Call the original method with title and message
+        super._showNotification(title, message, type);
+
+        // Check if we should add the notification to the dropdown
+        const container = document.getElementById('notificationsContainer');
+        if (!container) return;
+
+        const emptyMessage = container.querySelector('.text-center.text-gray-500');
+        if (emptyMessage) {
+            container.innerHTML = "";
+        }
+
+        // Create a formatted notification element
+        const notificationElement = document.createElement("div");
+        notificationElement.className = "notification-item p-3 border-b hover:bg-gray-50 unread";
+
+        // Add metadata as data attributes
+        if (metadata.inquiry_id) {
+            notificationElement.dataset.inquiryId = metadata.inquiry_id;
+        }
+
+        // Determine the appropriate icon based on notification type
+        let iconClass = 'fa-info-circle';
+        if (metadata.is_reply) {
+            iconClass = 'fa-reply';
+        } else if (type === 'success') {
+            iconClass = 'fa-check-circle';
+        } else if (type === 'warning') {
+            iconClass = 'fa-exclamation-triangle';
+        } else if (type === 'error') {
+            iconClass = 'fa-exclamation-circle';
+        }
+
+        // Create message preview - limit to 100 characters
+        const messagePreview = message && message.length > 100
+            ? message.substring(0, 100) + '...'
+            : message || '';
+
+        // Create the notification content
+        notificationElement.innerHTML = `
+            <div class="flex items-start">
+                <div class="flex-shrink-0 pt-1">
+                    <i class="fas ${iconClass} text-blue-500"></i>
+                </div>
+                <div class="ml-3 flex-grow notification-content">
+                    <div class="text-sm font-medium text-gray-900">${title}</div>
+                    <div class="text-xs text-gray-600 mt-1 notification-preview">${messagePreview}</div>
+                    <div class="text-xs text-gray-400 mt-1">Just now</div>
+                </div>
+                <button class="notification-close text-gray-400 hover:text-gray-600 ml-2">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+
+        // Add click handler for redirection
+        notificationElement.addEventListener('click', function (e) {
+            // Don't navigate if clicked on close button
+            if (e.target.closest('.notification-close')) {
+                return;
+            }
+
+            const inquiryId = this.dataset.inquiryId;
+            if (inquiryId) {
+                window.location.href = `/student/inquiry/${inquiryId}`;
+            }
+        });
+
+        // Add close button functionality
+        const closeBtn = notificationElement.querySelector('.notification-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                const notifItem = this.closest('.notification-item');
+
+                // Animate removal
+                notifItem.style.height = notifItem.offsetHeight + 'px';
+                setTimeout(() => {
+                    notifItem.style.height = '0';
+                    notifItem.style.padding = '0';
+                    notifItem.style.margin = '0';
+                    notifItem.style.opacity = '0';
+                    notifItem.style.overflow = 'hidden';
+                }, 10);
+
+                setTimeout(() => {
+                    notifItem.remove();
+
+                    // Update badge count
+                    const badge = document.getElementById('notificationBadge');
+                    if (badge) {
+                        let count = parseInt(badge.textContent || '0');
+                        if (count > 0) {
+                            count--;
+                            badge.textContent = count;
+                            if (count === 0) badge.classList.add('hidden');
+                        }
+                    }
+
+                    // Show empty message if needed
+                    if (!container.querySelector('.notification-item')) {
+                        container.innerHTML = `
+                            <div class="p-3 text-center text-gray-500">
+                                <i class="far fa-bell-slash text-gray-300 text-lg mb-2"></i>
+                                <p>No notifications</p>
+                            </div>
+                        `;
+                    }
+                }, 300);
+            });
+        }
+
+        // Add to container
+        container.prepend(notificationElement);
     }
 
     _createNotificationSound() {

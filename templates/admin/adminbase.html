@@ -176,7 +176,7 @@
               >
                 {% if current_user.profile_pic %}
                 <img
-                  src="{{ url_for('static', filename=current_user.profile_pic) }}"
+                  src="{{ url_for('static', filename='uploads/profile_pics/' + current_user.profile_pic) }}"
                   alt="Profile Picture"
                   class="w-full h-full object-cover"
                 />
@@ -230,7 +230,7 @@
             >
               {% if current_user.profile_pic %}
               <img
-                src="{{ url_for('static', filename=current_user.profile_pic) }}"
+                src="{{ url_for('static', filename='uploads/profile_pics/' + current_user.profile_pic) }}"
                 alt="Profile Picture"
                 class="w-full h-full object-cover"
               />

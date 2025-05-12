@@ -237,9 +237,62 @@ class Notification(db.Model):
     message = db.Column(db.Text, nullable=False)
     is_read = db.Column(db.Boolean, default=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-
-    user = db.relationship('User', back_populates='notifications')
     
+    # New fields for better notification support
+    notification_type = db.Column(db.String(50), default='general', index=True)  # 'inquiry_reply', 'announcement', 'status_change', etc.
+    source_office_id = db.Column(db.Integer, db.ForeignKey('offices.id', ondelete='SET NULL'), index=True)  # Office that triggered the notification
+    inquiry_id = db.Column(db.Integer, db.ForeignKey('inquiries.id', ondelete='SET NULL'), index=True)  # Related inquiry, if any
+    announcement_id = db.Column(db.Integer, db.ForeignKey('announcements.id', ondelete='SET NULL'), index=True)  # Related announcement, if any
+    
+    # Relationships
+    user = db.relationship('User', back_populates='notifications')
+    source_office = db.relationship('Office', foreign_keys=[source_office_id])
+    inquiry = db.relationship('Inquiry', foreign_keys=[inquiry_id])
+    announcement = db.relationship('Announcement', foreign_keys=[announcement_id])
+    
+    @classmethod
+    def create_inquiry_reply_notification(cls, user_id, inquiry, office, message_preview):
+        """Create a notification for an inquiry reply"""
+        notification = cls(
+            user_id=user_id,
+            title=f"{office.name} replied",
+            message=message_preview,
+            notification_type='inquiry_reply',
+            source_office_id=office.id,
+            inquiry_id=inquiry.id
+        )
+        db.session.add(notification)
+        return notification
+    
+    @classmethod
+    def create_announcement_notification(cls, user_id, announcement, office):
+        """Create a notification for a new announcement"""
+        notification = cls(
+            user_id=user_id,
+            title=f"New Announcement from {office.name}",
+            message=announcement.title,
+            notification_type='announcement',
+            source_office_id=office.id,
+            announcement_id=announcement.id
+        )
+        db.session.add(notification)
+        return notification
+    
+    @classmethod
+    def create_status_change_notification(cls, user_id, inquiry, new_status):
+        """Create a notification for an inquiry status change"""
+        office = inquiry.office
+        notification = cls(
+            user_id=user_id,
+            title=f"Inquiry Status Updated",
+            message=f"Your inquiry #{inquiry.id} has been marked as {new_status}",
+            notification_type='status_change',
+            source_office_id=office.id,
+            inquiry_id=inquiry.id
+        )
+        db.session.add(notification)
+        return notification
+
 class FileAttachment(db.Model):
     """Base model for file attachments"""
     __tablename__ = 'file_attachments'

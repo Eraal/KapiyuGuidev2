@@ -2,7 +2,6 @@ from flask import Blueprint, render_template, redirect, url_for, flash, session,
 from werkzeug.security import check_password_hash, generate_password_hash  
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models import User, Student, AuditLog
-from app.models import User, Student  
 from datetime import datetime
 from app.extensions import db  
 from flask_wtf.csrf import CSRFProtect
@@ -30,8 +29,8 @@ def login():
 
             # Log successful login
             log = AuditLog(
-                actor_id=user.id,  # Changed from user_id to actor_id
-                actor_role=user.role,  # Added actor_role
+                actor_id=user.id,
+                actor_role=user.role,
                 action='Logged in',
                 target_type='authentication',
                 status_snapshot='success',
@@ -40,6 +39,16 @@ def login():
                 user_agent=request.user_agent.string if request.user_agent else None
             )
             db.session.add(log)
+            
+            # If user is an office admin, create an office login log
+            if user.role == 'office_admin' and user.office_admin:
+                from app.models import OfficeLoginLog
+                login_log = OfficeLoginLog.log_login(
+                    office_admin=user.office_admin,
+                    ip_address=request.remote_addr,
+                    user_agent=request.user_agent.string if request.user_agent else None
+                )
+            
             db.session.commit()
             
             # Redirect based on role
@@ -55,15 +64,15 @@ def login():
         else:
             # Failed login attempt
             log = AuditLog(
-                actor_id=user.id if user else None,  # Changed from user_id to actor_id
-                actor_role=user.role if user else None,  # Added actor_role
+                actor_id=user.id if user else None,
+                actor_role=user.role if user else None,
                 action='Failed login attempt',
                 target_type='authentication',
                 status_snapshot='failed',
                 is_success=False,
                 ip_address=request.remote_addr,
                 user_agent=request.user_agent.string if request.user_agent else None,
-                failure_reason='Invalid credentials'  # Added failure reason
+                failure_reason='Invalid credentials'
             )
             db.session.add(log)
             db.session.commit()
@@ -131,21 +140,36 @@ def register():
 @auth_bp.route('/logout')
 @login_required 
 def logout():
-    # Update online status before logging out
-    current_user.is_online = False
-    
-    log = AuditLog(
-        actor_id=current_user.id,
-        actor_role=current_user.role,
-        action='Logged out',
-        target_type='authentication',
-        status_snapshot='success',
-        is_success=True,
-        ip_address=request.remote_addr,
-        user_agent=request.user_agent.string if request.user_agent else None
-    )
-    db.session.add(log)
-    db.session.commit()
+    # Update online status and last activity before logging out
+    if current_user.is_authenticated:
+        current_user.is_online = False
+        current_user.last_activity = datetime.utcnow()
+        
+        log = AuditLog(
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            action='Logged out',
+            target_type='authentication',
+            status_snapshot='success',
+            is_success=True,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string if request.user_agent else None
+        )
+        
+        # If user is an office admin, update their office login log
+        if current_user.role == 'office_admin' and current_user.office_admin:
+            from app.models import OfficeLoginLog
+            # Find the most recent login log for this admin that doesn't have a logout time
+            login_log = OfficeLoginLog.query.filter_by(
+                office_admin_id=current_user.office_admin.id,
+                logout_time=None
+            ).order_by(OfficeLoginLog.login_time.desc()).first()
+            
+            if login_log:
+                login_log.update_logout()
+        
+        db.session.add(log)
+        db.session.commit()
     
     logout_user()
     flash('You have been logged out.', 'success')

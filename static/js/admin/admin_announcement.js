@@ -23,11 +23,11 @@ function closeNewAnnouncementModal() {
 function openEditAnnouncementModal(announcementId) {
     // Reset the form
     document.getElementById('editAnnouncementForm').reset();
-    
+
     // Clear existing images container
     const existingImagesContainer = document.getElementById('existing-images-container');
     existingImagesContainer.innerHTML = ''; // Clear previous content
-    
+
     // Reset new image uploads
     const container = document.getElementById('edit-image-upload-container');
     const items = container.querySelectorAll('.image-upload-item');
@@ -40,7 +40,7 @@ function openEditAnnouncementModal(announcementId) {
     const preview = firstItem.querySelector('.image-preview');
     preview.innerHTML = '';
     firstItem.querySelector('.remove-image').classList.add('hidden');
-    
+
     // Fetch the announcement data from the server
     fetch(`/admin/get_announcement/${announcementId}`)
         .then(response => response.json())
@@ -48,7 +48,7 @@ function openEditAnnouncementModal(announcementId) {
             document.getElementById('edit_announcement_id').value = data.id;
             document.getElementById('edit_title').value = data.title;
             document.getElementById('edit_content').value = data.content;
-            
+
             if (data.is_public) {
                 document.getElementById('edit_visibility').value = 'public';
                 document.getElementById('editOfficeSelectionDiv').classList.add('hidden');
@@ -57,17 +57,18 @@ function openEditAnnouncementModal(announcementId) {
                 document.getElementById('editOfficeSelectionDiv').classList.remove('hidden');
                 document.getElementById('edit_target_office_id').value = data.target_office_id;
             }
-            
+
             // Populate existing images
             if (data.images && data.images.length > 0) {
                 existingImagesContainer.classList.remove('hidden');
-                
+
                 data.images.forEach(image => {
                     const imageCard = document.createElement('div');
                     imageCard.className = 'bg-white p-3 rounded-lg shadow-sm border';
                     imageCard.innerHTML = `
                         <div class="relative mb-2">
-                            <img src="${image.image_path}" alt="${image.caption || 'Announcement image'}" class="w-full h-32 object-cover rounded-md">
+                            <img src="${image.image_path}" alt="${image.caption || 'Announcement image'}" class="w-full h-32 object-cover rounded-md preview-image cursor-pointer" 
+                                onclick="showImagePreview('${image.image_path}', '${image.caption || ''}')">
                         </div>
                         <div class="space-y-2">
                             <div class="flex items-center justify-between">
@@ -94,7 +95,7 @@ function openEditAnnouncementModal(announcementId) {
             } else {
                 existingImagesContainer.classList.add('hidden');
             }
-            
+
             // Show the modal
             document.getElementById('editAnnouncementModal').classList.remove('hidden');
         })
@@ -125,29 +126,29 @@ function confirmDeleteImage(imageId, announcementId) {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = '/admin/delete_announcement_image';
-        
+
         // Add CSRF token from an existing form
         const csrfToken = document.querySelector('input[name="csrf_token"]').value;
-        
+
         const csrfInput = document.createElement('input');
         csrfInput.type = 'hidden';
         csrfInput.name = 'csrf_token';
         csrfInput.value = csrfToken;
-        
+
         const imageIdInput = document.createElement('input');
         imageIdInput.type = 'hidden';
         imageIdInput.name = 'image_id';
         imageIdInput.value = imageId;
-        
+
         const announcementIdInput = document.createElement('input');
         announcementIdInput.type = 'hidden';
         announcementIdInput.name = 'announcement_id';
         announcementIdInput.value = announcementId;
-        
+
         form.appendChild(csrfInput);
         form.appendChild(imageIdInput);
         form.appendChild(announcementIdInput);
-        
+
         document.body.appendChild(form);
         form.submit();
     }
@@ -157,7 +158,7 @@ function confirmDeleteImage(imageId, announcementId) {
 function toggleOfficeSelection() {
     const visibility = document.getElementById('visibility').value;
     const officeDiv = document.getElementById('officeSelectionDiv');
-    
+
     if (visibility === 'office') {
         officeDiv.classList.remove('hidden');
         document.getElementById('target_office_id').setAttribute('required', 'required');
@@ -170,7 +171,7 @@ function toggleOfficeSelection() {
 function toggleEditOfficeSelection() {
     const visibility = document.getElementById('edit_visibility').value;
     const officeDiv = document.getElementById('editOfficeSelectionDiv');
-    
+
     if (visibility === 'office') {
         officeDiv.classList.remove('hidden');
         document.getElementById('edit_target_office_id').setAttribute('required', 'required');
@@ -180,33 +181,49 @@ function toggleEditOfficeSelection() {
     }
 }
 
-// Image upload functions
+// Image preview functions
 function previewImage(input) {
     const uploadItem = input.closest('.image-upload-item');
     const preview = uploadItem.querySelector('.image-preview');
     const removeButton = uploadItem.querySelector('.remove-image');
-    
+
     if (input.files && input.files[0]) {
         const reader = new FileReader();
-        
-        reader.onload = function(e) {
+
+        reader.onload = function (e) {
             preview.innerHTML = `<img src="${e.target.result}" alt="Preview" class="h-32 rounded-md shadow-sm">`;
             removeButton.classList.remove('hidden');
         }
-        
+
         reader.readAsDataURL(input.files[0]);
     }
+}
+
+// New function to show image preview modal
+function showImagePreview(src, caption) {
+    const modal = document.getElementById('imagePreviewModal');
+    const image = document.getElementById('fullSizeImage');
+    const captionElement = document.getElementById('imageCaption');
+
+    image.src = src;
+    captionElement.textContent = caption;
+    modal.classList.remove('hidden');
+}
+
+// New function to close image preview modal
+function closeImagePreviewModal() {
+    document.getElementById('imagePreviewModal').classList.add('hidden');
 }
 
 function createImageUploadItem(containerId) {
     const container = document.getElementById(containerId);
     const newItem = document.createElement('div');
     newItem.className = 'image-upload-item p-4 border border-dashed border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors duration-200';
-    
+
     const fileInputName = containerId === 'image-upload-container' ? 'images[]' : 'new_images[]';
     const captionsName = containerId === 'image-upload-container' ? 'captions[]' : 'new_captions[]';
     const ordersName = containerId === 'image-upload-container' ? 'display_orders[]' : 'new_display_orders[]';
-    
+
     newItem.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div class="col-span-1">
@@ -227,9 +244,9 @@ function createImageUploadItem(containerId) {
             <i class="fas fa-trash mr-1"></i> Remove Image
         </button>
     `;
-    
+
     container.appendChild(newItem);
-    
+
     // Initially hide the remove button
     const removeButton = newItem.querySelector('.remove-image');
     removeButton.classList.add('hidden');
@@ -238,7 +255,7 @@ function createImageUploadItem(containerId) {
 function removeImageUploadItem(button) {
     const item = button.closest('.image-upload-item');
     const container = item.parentElement;
-    
+
     // Only remove if there's more than one upload item
     if (container.querySelectorAll('.image-upload-item').length > 1) {
         container.removeChild(item);
@@ -256,118 +273,88 @@ function applyFilters() {
     const officeFilter = document.getElementById('officeFilter').value;
     const statusFilter = document.getElementById('statusFilter').value;
     const dateRangeFilter = document.getElementById('dateRangeFilter').value;
-    
+
     // Build query string
     let queryParams = new URLSearchParams();
     if (officeFilter) queryParams.append('office_id', officeFilter);  // Changed from 'office' to 'office_id'
     if (statusFilter) queryParams.append('visibility', statusFilter);  // Changed from 'status' to 'visibility'
     if (dateRangeFilter) queryParams.append('date_range', dateRangeFilter);
-    
+
     // Redirect with filters
     window.location.href = `${window.location.pathname}?${queryParams.toString()}`;
 }
 
 // Initialize the page
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // Set up filter button
     const applyFiltersBtn = document.getElementById('applyFilters');
     if (applyFiltersBtn) {
         applyFiltersBtn.addEventListener('click', applyFilters);
     }
-    
+
     // Set up add more images buttons
     const addMoreImagesBtn = document.getElementById('add-more-images');
     if (addMoreImagesBtn) {
-        addMoreImagesBtn.addEventListener('click', function() {
+        addMoreImagesBtn.addEventListener('click', function () {
             createImageUploadItem('image-upload-container');
         });
     }
-    
+
     const editAddMoreImagesBtn = document.getElementById('edit-add-more-images');
     if (editAddMoreImagesBtn) {
-        editAddMoreImagesBtn.addEventListener('click', function() {
+        editAddMoreImagesBtn.addEventListener('click', function () {
             createImageUploadItem('edit-image-upload-container');
         });
     }
-    
+
     // Set up remove image buttons for the initial upload items
     document.querySelectorAll('.remove-image').forEach(button => {
-        button.addEventListener('click', function() {
+        button.addEventListener('click', function () {
             removeImageUploadItem(this);
         });
     });
-    
+
+    // Make all announcement images clickable for preview
+    document.querySelectorAll('.announcement-card img:not(.preview-image)').forEach(img => {
+        img.classList.add('cursor-pointer');
+        img.addEventListener('click', function () {
+            showImagePreview(this.src, this.alt !== 'Announcement image' ? this.alt : '');
+        });
+    });
+
     // Initialize dropdowns
     document.querySelectorAll('.dropdown').forEach(dropdown => {
         const button = dropdown.querySelector('button');
         const content = dropdown.querySelector('.dropdown-content');
-        
+
         if (button && content) {
-            // Initially hide dropdown content
-            content.style.display = 'none';
-            
-            button.addEventListener('click', function(e) {
+            button.addEventListener('click', function (e) {
                 e.stopPropagation();
-                if (content.style.display === 'none') {
-                    // Hide all other dropdowns first
-                    document.querySelectorAll('.dropdown-content').forEach(c => {
-                        c.style.display = 'none';
-                    });
-                    // Show this dropdown
-                    content.style.display = 'block';
-                } else {
-                    content.style.display = 'none';
-                }
+                content.classList.toggle('active');
             });
         }
     });
-    
+
     // Close dropdowns when clicking outside
-    document.addEventListener('click', function() {
-        document.querySelectorAll('.dropdown-content').forEach(content => {
-            content.style.display = 'none';
+    document.addEventListener('click', function () {
+        document.querySelectorAll('.dropdown-content.active').forEach(dropdown => {
+            dropdown.classList.remove('active');
         });
     });
-    
-    // Initialize form validations
-    const newAnnouncementForm = document.getElementById('newAnnouncementForm');
-    if (newAnnouncementForm) {
-        newAnnouncementForm.addEventListener('submit', function(e) {
-            const visibility = document.getElementById('visibility').value;
-            if (visibility === 'office') {
-                const officeId = document.getElementById('target_office_id').value;
-                if (!officeId) {
-                    e.preventDefault();
-                    alert('Please select a target office for office-specific announcements.');
-                }
-            }
-        });
-    }
-    
-    const editAnnouncementForm = document.getElementById('editAnnouncementForm');
-    if (editAnnouncementForm) {
-        editAnnouncementForm.addEventListener('submit', function(e) {
-            const visibility = document.getElementById('edit_visibility').value;
-            if (visibility === 'office') {
-                const officeId = document.getElementById('edit_target_office_id').value;
-                if (!officeId) {
-                    e.preventDefault();
-                    alert('Please select a target office for office-specific announcements.');
-                }
-            }
-        });
-    }
-    
+
     // Initialize visibility toggles
-    const visibilityDropdown = document.getElementById('visibility');
-    if (visibilityDropdown) {
-        toggleOfficeSelection();
-    }
-    
-    const editVisibilityDropdown = document.getElementById('edit_visibility');
-    if (editVisibilityDropdown) {
-        toggleEditOfficeSelection();
-    }
+    toggleOfficeSelection();
+    toggleEditOfficeSelection();
+
+    // Set initial filter values from URL
+    const url = new URL(window.location);
+    const officeId = url.searchParams.get('office');
+    const visibility = url.searchParams.get('visibility');
+    const dateRange = url.searchParams.get('date_range');
+
+    if (officeId) document.getElementById('officeFilter').value = officeId;
+    if (visibility) document.getElementById('statusFilter').value = visibility;
+    if (dateRange) document.getElementById('dateRangeFilter').value = dateRange;
 });
 
 function closeFlashMessage(element) {

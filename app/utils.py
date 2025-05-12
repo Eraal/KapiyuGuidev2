@@ -31,6 +31,25 @@ def role_required(roles):
         return decorated_function
     return decorator
 
+def student_required(f):
+    """
+    Decorator for routes that should be accessible only by student users
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check if user is authenticated
+        if not current_user.is_authenticated:
+            flash('Please login to access this page.', 'warning')
+            return redirect(url_for('auth.login'))
+        
+        # Check if user has the student role
+        if current_user.role != 'student':
+            flash('You need to be a student to access this page.', 'danger')
+            return redirect(url_for('main.index'))
+            
+        return f(*args, **kwargs)
+    return decorated_function
+
 def format_date(timestamp):
     """
     Format a datetime object for display in frontend

@@ -35,8 +35,8 @@ def register_connection_handlers():
             
             # Super admin joins special room for super admin only broadcasts
             if current_user.role == 'super_admin':
-                join_room('admin_room')
-                print(f"Super Admin {current_user.email} joined admin_room")
+                join_room('super_admin_room')
+                print(f"Super Admin {current_user.email} joined super_admin_room")
             
             print(f"Admin {current_user.email} joined admin_room")
             
@@ -69,7 +69,7 @@ def register_connection_handlers():
                 leave_room(f"user_{current_user.id}")
                 
                 if current_user.role == 'super_admin':
-                    leave_room('admin_room')
+                    leave_room('super_admin_room')
                     SuperAdminActivityLog.log_action(
                         super_admin=current_user,
                         action="WebSocket Disconnect",
@@ -83,6 +83,20 @@ def register_connection_handlers():
                         target_type="system"
                     )
                 db.session.commit()
+                
+    @socketio.on('admin_status_change')
+    def handle_admin_status_change(data):
+        """Forward office admin status changes to super admins"""
+        if not current_user.is_authenticated:
+            return
+            
+        # Forward to super admin room for real-time updates
+        emit('staff_status_update', {
+            'user_id': data.get('user_id'),
+            'user_name': data.get('user_name', 'Unknown'),
+            'status': data.get('status', 'offline'),
+            'timestamp': data.get('timestamp', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+        }, room='super_admin_room')
 
 def register_inquiry_handlers():
     @socketio.on('join_admin_room')

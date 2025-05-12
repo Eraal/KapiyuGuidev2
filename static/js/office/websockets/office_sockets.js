@@ -574,13 +574,13 @@ class OfficeSocketManager extends BaseSocketManager {
             console.warn('Invalid message data received:', data);
             return;
         }
-        
+
         console.log('Processing new message:', data);
 
         // Check if we're on an inquiry detail page
         const isDetailPage = window.location.pathname.includes(`/inquiry/`);
         const isSpecificInquiryPage = window.location.pathname.includes(`/inquiry/${data.inquiry_id}`);
-        
+
         if (!isDetailPage) {
             this._showNotification('New Student Message',
                 `${data.sender_name || 'Student'} sent a new message in Inquiry #${data.inquiry_id}`,
@@ -592,27 +592,27 @@ class OfficeSocketManager extends BaseSocketManager {
 
         // If we're on the inquiry detail page, try multiple ways to find the chat container
         let messageContainer = null;
-        
+
         // Try the most direct method - find the message history element
         messageContainer = document.getElementById('messageHistory');
-        
+
         // If not found, try to find it by data attribute
         if (!messageContainer) {
             // First try with main container that has inquiry ID
-            const mainContainer = document.querySelector(`[data-inquiry-id="${data.inquiry_id}"][data-chat-container="true"]`) || 
-                                document.querySelector(`[data-inquiry-id="${data.inquiry_id}"]`);
-            
+            const mainContainer = document.querySelector(`[data-inquiry-id="${data.inquiry_id}"][data-chat-container="true"]`) ||
+                document.querySelector(`[data-inquiry-id="${data.inquiry_id}"]`);
+
             if (mainContainer) {
                 console.log('Found main container with matching inquiry ID:', mainContainer);
                 // Look for messageHistory inside this container
                 messageContainer = mainContainer.querySelector('#messageHistory');
             }
         }
-        
+
         // If still not found, try additional selectors
         if (!messageContainer && isDetailPage) {
             console.log('Trying alternative methods to find message container');
-            
+
             // Try other common message container selectors
             const possibleContainers = [
                 document.querySelector('.chat-messages'),
@@ -620,17 +620,17 @@ class OfficeSocketManager extends BaseSocketManager {
                 document.querySelector('#chat-messages'),
                 document.querySelector('.messages-wrapper')
             ];
-            
+
             // Use the first valid container found
             messageContainer = possibleContainers.find(container => container !== null);
         }
-        
+
         console.log('Message container found:', !!messageContainer, messageContainer);
-        
+
         if (messageContainer) {
             // Create and append a new message element
             const messageElement = this._createMessageElement(data);
-            
+
             // Add to the messages container
             messageContainer.appendChild(messageElement);
             console.log('Message element appended:', messageElement);
@@ -647,13 +647,13 @@ class OfficeSocketManager extends BaseSocketManager {
             }
         } else if (isDetailPage) {
             console.warn('We appear to be on the detail page but could not find any suitable message container');
-            
+
             // If this is specifically for the current inquiry and we still can't find a container
             // Try to refresh the page as a last resort if this is the specific inquiry page
             if (isSpecificInquiryPage) {
                 console.log('This message is for the current inquiry. Showing notification instead.');
-                this._showNotification('New Message Received', 
-                    `${data.sender_name || 'Student'} sent: ${data.content.substring(0, 50)}${data.content.length > 50 ? '...' : ''}`, 
+                this._showNotification('New Message Received',
+                    `${data.sender_name || 'Student'} sent: ${data.content.substring(0, 50)}${data.content.length > 50 ? '...' : ''}`,
                     'info');
                 this._playNotificationSound();
             }
@@ -663,7 +663,7 @@ class OfficeSocketManager extends BaseSocketManager {
         const inquiryRow = document.getElementById(`inquiry-${data.inquiry_id}`);
         if (inquiryRow) {
             console.log('Found inquiry row, updating indicator');
-            
+
             // Highlight row
             inquiryRow.classList.add('bg-blue-50');
             setTimeout(() => {
@@ -712,21 +712,21 @@ class OfficeSocketManager extends BaseSocketManager {
         const isSentByMe = message.sender_id == this._userId;
         const messageElement = document.createElement('div');
         messageElement.className = `flex ${isSentByMe ? 'justify-end' : ''}`;
-        
+
         // Format date nicely
         let formattedDate = 'Unknown date';
         if (message.timestamp) {
             const date = new Date(message.timestamp);
-            formattedDate = date.toLocaleString('default', { 
-                month: 'short', 
-                day: 'numeric', 
-                year: 'numeric', 
-                hour: 'numeric', 
-                minute: 'numeric', 
-                hour12: true 
+            formattedDate = date.toLocaleString('default', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: 'numeric',
+                hour12: true
             });
         }
-        
+
         // Get sender initials for avatar
         let senderInitials = 'UN';
         if (message.sender_name) {
@@ -737,7 +737,7 @@ class OfficeSocketManager extends BaseSocketManager {
                 senderInitials = message.sender_name.substring(0, 2);
             }
         }
-        
+
         // Create message HTML that matches the template format exactly
         messageElement.innerHTML = `
             <div class="message-bubble p-4 ${isSentByMe ? 'message-sent' : 'message-received'}"
@@ -774,15 +774,15 @@ class OfficeSocketManager extends BaseSocketManager {
               ${isSentByMe ? `
               <div class="message-status text-xs text-right mt-1">
                 <span class="status-icon">
-                  <i class="fas ${message.status === 'read' ? 'fa-check-double text-green-500' : 
-                                 message.status === 'delivered' ? 'fa-check-double' : 'fa-check'}"></i>
+                  <i class="fas ${message.status === 'read' ? 'fa-check-double text-green-500' :
+                    message.status === 'delivered' ? 'fa-check-double' : 'fa-check'}"></i>
                 </span>
                 <span class="status-text ml-1">${(message.status || 'sent').charAt(0).toUpperCase() + (message.status || 'sent').slice(1)}</span>
               </div>
               ` : ''}
             </div>
         `;
-        
+
         return messageElement;
     }
 
@@ -796,19 +796,19 @@ class OfficeSocketManager extends BaseSocketManager {
         // Create notification element
         const notificationDiv = document.createElement('div');
         notificationDiv.className = `fixed bottom-5 right-5 p-4 rounded shadow-lg z-50 
-            ${type === 'error' ? 'bg-red-600' : 
-            type === 'warning' ? 'bg-yellow-600' : 
-            type === 'success' ? 'bg-green-600' : 'bg-blue-600'} text-white`;
-        
+            ${type === 'error' ? 'bg-red-600' :
+                type === 'warning' ? 'bg-yellow-600' :
+                    type === 'success' ? 'bg-green-600' : 'bg-blue-600'} text-white`;
+
         // Set notification content
         notificationDiv.innerHTML = `
             <div class="flex items-center">
                 <div class="mr-3">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                        d="${type === 'error' ? 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' : 
-                        type === 'warning' ? 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' : 
-                        type === 'success' ? 'M5 13l4 4L19 7' : 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}"></path>
+                        d="${type === 'error' ? 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' :
+                type === 'warning' ? 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' :
+                    type === 'success' ? 'M5 13l4 4L19 7' : 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}"></path>
                     </svg>
                 </div>
                 <div>
@@ -822,10 +822,10 @@ class OfficeSocketManager extends BaseSocketManager {
                 </button>
             </div>
         `;
-        
+
         // Add to DOM
         document.body.appendChild(notificationDiv);
-        
+
         // Auto-remove after 5 seconds
         setTimeout(() => {
             if (notificationDiv.parentNode) {
