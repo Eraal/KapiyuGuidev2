@@ -5,7 +5,7 @@ from sqlalchemy import desc
 from app.student import student_bp
 from app.models import (
     CounselingSession, Student, User, Office, 
-    StudentActivityLog, Notification
+    StudentActivityLog, Notification, OfficeConcernType, ConcernType
 )
 from app.extensions import db
 from app.utils import role_required
@@ -109,13 +109,13 @@ def schedule_session():
     office_id = request.form.get('office_id')
     scheduled_date = request.form.get('scheduled_date')
     scheduled_time = request.form.get('scheduled_time')
-    is_video = 'is_video' in request.form
+    is_video = request.form.get('is_video') == 'true'  # Handle string value 'true' vs 'false'
     notes = request.form.get('notes', '')
     
     # Validate required fields
     if not office_id or not scheduled_date or not scheduled_time:
         flash('Please fill all required fields', 'error')
-        return redirect(url_for('student.counseling_sessions'))
+        return redirect(url_for('student.request_counseling_session'))
     
     try:
         # Parse the date and time
@@ -124,10 +124,18 @@ def schedule_session():
         # Ensure the appointment is in the future
         if scheduled_datetime <= datetime.utcnow():
             flash('Appointment must be scheduled for a future date and time', 'error')
-            return redirect(url_for('student.counseling_sessions'))
+            return redirect(url_for('student.request_counseling_session'))
         
         # Get the student record
         student = Student.query.filter_by(user_id=current_user.id).first_or_404()
+        
+        # Verify the office exists
+        office = Office.query.get_or_404(office_id)
+        
+        # If video session is requested, verify office supports it
+        if is_video and not office.supports_video:
+            flash('The selected office does not support video counseling', 'error')
+            return redirect(url_for('student.request_counseling_session'))
         
         # Create new counseling session
         new_session = CounselingSession(
@@ -145,7 +153,7 @@ def schedule_session():
         log_entry = StudentActivityLog(
             student_id=student.id,
             action="Scheduled new counseling session",
-            details=f"Office ID: {office_id}, Scheduled at: {scheduled_datetime}",
+            details=f"Office ID: {office_id}, Scheduled at: {scheduled_datetime}, Video: {is_video}",
             timestamp=datetime.utcnow(),
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string
@@ -159,4 +167,87 @@ def schedule_session():
     except Exception as e:
         db.session.rollback()
         flash(f'Error scheduling session: {str(e)}', 'error')
-        return redirect(url_for('student.counseling_sessions'))
+        return redirect(url_for('student.request_counseling_session'))
+
+@student_bp.route('/request-counseling-session')
+@login_required
+@role_required(['student'])
+def request_counseling_session():
+    """Display form to request a new counseling session"""
+    # Get the student record
+    student = Student.query.filter_by(user_id=current_user.id).first_or_404()
+    
+    # Get all offices for selecting where to schedule a session
+    offices = Office.query.all()
+    
+    # Count offices that have counseling sessions (using the relationship)
+    # An office supports counseling if it has counseling_sessions relationship
+    counseling_offices = []
+    for office in offices:
+        # Consider an office as supporting counseling if it has the counseling_sessions relationship
+        # We can identify offices that support counseling by checking if they have been used for sessions before
+        # or by checking if they have counselors assigned
+        if hasattr(office, 'counseling_sessions'):
+            counseling_offices.append(office)
+    
+    counseling_offices_count = len(counseling_offices)
+    
+    # Get unread notifications count for navbar
+    unread_notifications_count = Notification.query.filter_by(
+        user_id=current_user.id,
+        is_read=False
+    ).count()
+    
+    # Get notifications for dropdown
+    notifications = Notification.query.filter_by(
+        user_id=current_user.id
+    ).order_by(desc(Notification.created_at)).limit(5).all()
+    
+    # Get date constraints for the form
+    today = datetime.utcnow().date().strftime('%Y-%m-%d')
+    max_date = (datetime.utcnow() + timedelta(days=30)).date().strftime('%Y-%m-%d')
+    
+    # Log this activity
+    log_entry = StudentActivityLog(
+        student_id=student.id,
+        action="Viewed counseling session request form",
+        timestamp=datetime.utcnow(),
+        ip_address=request.remote_addr,
+        user_agent=request.user_agent.string
+    )
+    db.session.add(log_entry)
+    db.session.commit()
+    
+    return render_template(
+        'student/request_counseling.html',
+        offices=offices,
+        counseling_offices_count=counseling_offices_count,
+        today=today,
+        max_date=max_date,
+        unread_notifications_count=unread_notifications_count,
+        notifications=notifications
+    )
+
+@student_bp.route('/office/<int:office_id>/check-video-support')
+@login_required
+@role_required(['student'])
+def check_office_video_support(office_id):
+    """API endpoint to check if an office supports video counseling"""
+    office = Office.query.get_or_404(office_id)
+    
+    # Log this API call
+    student = Student.query.filter_by(user_id=current_user.id).first()
+    log_entry = StudentActivityLog(
+        student_id=student.id,
+        action=f"Checked video support for office: {office.name}",
+        timestamp=datetime.utcnow(),
+        ip_address=request.remote_addr,
+        user_agent=request.user_agent.string
+    )
+    db.session.add(log_entry)
+    db.session.commit()
+    
+    return jsonify({
+        'supports_video': office.supports_video,
+        'office_name': office.name
+    })

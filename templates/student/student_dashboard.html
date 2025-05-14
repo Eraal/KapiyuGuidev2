@@ -29,8 +29,13 @@ KapiyuGuide{% endblock %} {% block extra_head %}
       </h1>
       <p class="text-gray-600">{{ today.strftime('%A, %B %d, %Y') }}</p>
     </div>
-    <div class="mt-4 md:mt-0">
-      
+    <div class="mt-4 md:mt-0 flex space-x-3">
+      <a
+        href="{{ url_for('student.request_counseling_session') }}"
+        class="px-4 py-2 bg-green-600 text-white rounded-md flex items-center hover:bg-green-700 transition-colors"
+      >
+        <i class="fas fa-calendar-plus mr-2"></i> Request Counseling Session
+      </a>
     </div>
   </div>
 
@@ -225,8 +230,7 @@ KapiyuGuide{% endblock %} {% block extra_head %}
             <i class="fas fa-calendar-day text-3xl mb-2"></i>
             <p>No upcoming sessions scheduled</p>
             <a
-              href="#"
-              id="scheduleSessionBtn"
+              href="{{ url_for('student.request_counseling_session') }}"
               class="mt-2 inline-block text-blue-600 hover:text-blue-800 hover:underline"
               >Schedule a session</a
             >
@@ -785,27 +789,11 @@ KapiyuGuide{% endblock %} {% block extra_head %}
     // Schedule Session Modal
     const scheduleSessionBtn = document.getElementById("scheduleSessionBtn");
     if (scheduleSessionBtn) {
-      const scheduleSessionModal = document.getElementById(
-        "scheduleSessionModal"
-      );
-      const sessionModalOverlay = document.getElementById(
-        "sessionModalOverlay"
-      );
-      const closeSessionModal = document.getElementById("closeSessionModal");
-      const cancelSession = document.getElementById("cancelSession");
-
       scheduleSessionBtn.addEventListener("click", function (e) {
         e.preventDefault();
-        scheduleSessionModal.classList.remove("hidden");
+        window.location.href =
+          "{{ url_for('student.request_counseling_session') }}";
       });
-
-      const closeScheduleModal = function () {
-        scheduleSessionModal.classList.add("hidden");
-      };
-
-      closeSessionModal.addEventListener("click", closeScheduleModal);
-      sessionModalOverlay.addEventListener("click", closeScheduleModal);
-      cancelSession.addEventListener("click", closeScheduleModal);
     }
 
     // Handle office selection and concern types loading
