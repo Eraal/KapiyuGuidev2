@@ -22,6 +22,7 @@ class InquiryChat {
      * @param {string} config.currentUserRole - The current user's role
      * @param {string} config.currentUserName - The current user's full name
      * @param {string} config.currentUserInitials - The current user's initials
+     * @param {string|number} [config.studentId] - The student's ID (only needed for office admin)
      */
     constructor(config) {
         // Store configuration
@@ -35,12 +36,14 @@ class InquiryChat {
         this.currentUserRole = config.currentUserRole;
         this.currentUserName = config.currentUserName;
         this.currentUserInitials = config.currentUserInitials;
+        this.studentId = config.studentId;
 
         // Internal state
         this.isTyping = false;
         this.typingTimeout = null;
         this.unreadMessages = [];
         this.notificationSound = document.getElementById('notificationSound');
+        this.debugMode = true; // Enable debugging
 
         // Initialize the chat
         this.init();
@@ -52,7 +55,9 @@ class InquiryChat {
     init() {
         // Join the room for this inquiry
         const room = `inquiry_${this.inquiryId}`;
-        this.socket.emit('join', { room: room });
+        this.socket.emit('join_inquiry_room', {
+            inquiry_id: this.inquiryId
+        });
 
         // Set up event listeners
         this.setupSocketListeners();
@@ -61,58 +66,98 @@ class InquiryChat {
         // Mark messages as read when they're in the viewport
         this.markVisibleMessagesAsRead();
 
-        console.log(`InquiryChat initialized for inquiry ${this.inquiryId}`);
+        this.debug(`InquiryChat initialized for inquiry ${this.inquiryId}, user ${this.currentUserName} (${this.currentUserRole})`);
+    }
+
+    /**
+     * Log debug messages
+     */
+    debug(...args) {
+        if (this.debugMode) {
+            console.log(`[InquiryChat]`, ...args);
+        }
     }
 
     /**
      * Set up Socket.IO event listeners
      */
     setupSocketListeners() {
-        // Listen for new messages
-        this.socket.on('new_message', (data) => {
-            // Only handle messages for this inquiry
-            if (data.inquiry_id != this.inquiryId) return;
+        // Listen for new messages - handle all possible event types
+        const messageEventHandler = (data) => {
+            this.debug('Received message event:', data);
 
-            // If the message is from someone else, play notification sound
+            // Only handle messages for this inquiry
+            if (data.inquiry_id != this.inquiryId) {
+                this.debug('Message is for another inquiry, ignoring');
+                return;
+            }
+
+            // If the message is from someone else
             if (data.sender_id != this.currentUserId) {
+                this.debug('Message is from another user, processing...');
                 this.playNotificationSound();
 
                 // Mark message as delivered
                 this.socket.emit('chat_message_delivered', {
                     inquiry_id: this.inquiryId,
-                    message_id: data.message_id,
+                    message_id: data.message_id || data.id,
                     sender_id: data.sender_id
                 });
+                this.debug('Marked message as delivered');
 
                 // Add to unread messages if not currently visible
-                this.unreadMessages.push(data.message_id);
+                const messageId = data.message_id || data.id;
+                this.unreadMessages.push(messageId);
 
                 // Mark as read if the message is currently visible
                 if (document.visibilityState === 'visible') {
                     this.markVisibleMessagesAsRead();
                 }
+            } else {
+                this.debug('Message is from current user');
             }
 
             // Update the UI if the message isn't already in the DOM
-            if (!document.querySelector(`[data-message-id="${data.message_id}"]`)) {
+            const messageId = data.message_id || data.id;
+            if (!document.querySelector(`[data-message-id="${messageId}"]`)) {
+                this.debug('Appending new message to UI');
                 this.appendMessage(data);
             }
-        });
+        };
 
-        // Listen for typing indicators
-        this.socket.on('user_typing', (data) => {
-            // Only handle typing indicators for this inquiry and from other users
-            if (data.inquiry_id != this.inquiryId || data.user_id == this.currentUserId) return;
+        // Listen for all message event types
+        this.socket.on('new_chat_message', messageEventHandler);
+        this.socket.on('new_message', messageEventHandler);
+        this.socket.on('student_message_sent', messageEventHandler);
+
+        // Listen for typing indicators - handle both student and admin typing events
+        const typingEventHandler = (data) => {
+            this.debug('Received typing indicator:', data);
+
+            // Only handle typing indicators for this inquiry
+            if (data.inquiry_id != this.inquiryId) return;
+
+            // Skip if this is our own typing event
+            if (this.currentUserRole === 'office_admin' && data.office_admin_id == this.currentUserId) return;
+            if (this.currentUserRole === 'student' && data.student_id == this.currentUserId) return;
 
             if (data.is_typing) {
-                this.showTypingIndicator(data.user_name);
+                const userName = data.admin_name || data.user_name || 'User';
+                this.showTypingIndicator(userName);
             } else {
                 this.hideTypingIndicator();
             }
-        });
+        };
+
+        // Listen for both admin and student typing indicators
+        this.socket.on('user_typing', typingEventHandler);
+        this.socket.on('student_typing', typingEventHandler);
+        this.socket.on('admin_typing', typingEventHandler);
 
         // Listen for message status updates
         this.socket.on('message_status_update', (data) => {
+            this.debug('Received message status update:', data);
+
             // Only handle updates for this inquiry
             if (data.inquiry_id != this.inquiryId) return;
 
@@ -139,6 +184,8 @@ class InquiryChat {
                     if (textElement) {
                         textElement.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
                     }
+
+                    this.debug('Updated message status in UI');
                 }
             }
         });
@@ -190,10 +237,26 @@ class InquiryChat {
         // If not already marked as typing, emit the typing event
         if (!this.isTyping) {
             this.isTyping = true;
-            this.socket.emit('typing_indicator', {
-                inquiry_id: this.inquiryId,
-                is_typing: true
-            });
+
+            // Emit appropriate typing event based on user role
+            if (this.currentUserRole === 'student') {
+                this.socket.emit('student_typing', {
+                    inquiry_id: this.inquiryId,
+                    student_id: this.currentUserId,
+                    is_typing: true
+                });
+                this.debug('Emitted student typing event (typing)');
+            } else if (this.currentUserRole === 'office_admin') {
+                // For office admins, we need to specify both the inquiry and the student
+                this.socket.emit('typing_indicator', {
+                    inquiry_id: this.inquiryId,
+                    student_id: this.studentId,
+                    office_admin_id: this.currentUserId,
+                    admin_name: this.currentUserName,
+                    is_typing: true
+                });
+                this.debug('Emitted admin typing event (typing)');
+            }
         }
 
         // Clear any existing timeout
@@ -213,10 +276,26 @@ class InquiryChat {
     stopTypingIndicator() {
         if (this.isTyping) {
             this.isTyping = false;
-            this.socket.emit('typing_indicator', {
-                inquiry_id: this.inquiryId,
-                is_typing: false
-            });
+
+            // Emit appropriate typing event based on user role
+            if (this.currentUserRole === 'student') {
+                this.socket.emit('student_typing', {
+                    inquiry_id: this.inquiryId,
+                    student_id: this.currentUserId,
+                    is_typing: false
+                });
+                this.debug('Emitted student typing event (stopped)');
+            } else if (this.currentUserRole === 'office_admin') {
+                // For office admins, we need to specify both the inquiry and the student
+                this.socket.emit('typing_indicator', {
+                    inquiry_id: this.inquiryId,
+                    student_id: this.studentId,
+                    office_admin_id: this.currentUserId,
+                    admin_name: this.currentUserName,
+                    is_typing: false
+                });
+                this.debug('Emitted admin typing event (stopped)');
+            }
         }
 
         // Clear the timeout
@@ -245,14 +324,16 @@ class InquiryChat {
         `;
 
         this.typingIndicator.classList.remove('hidden');
+        this.debug(`Showing typing indicator for ${userName}`);
     }
 
     /**
-     * Hide the typing indicator
+     * Hide typing indicator
      */
     hideTypingIndicator() {
         if (!this.typingIndicator) return;
         this.typingIndicator.classList.add('hidden');
+        this.debug('Hiding typing indicator');
     }
 
     /**
@@ -263,14 +344,38 @@ class InquiryChat {
         if (!this.messageContainer) return;
 
         const isSentByMe = message.sender_id == this.currentUserId;
-        const formattedDate = new Date(message.timestamp).toLocaleString();
+        const messageId = message.message_id || message.id;
+
+        // Format the date
+        let formattedDate = 'Unknown date';
+        if (message.timestamp || message.created_at) {
+            const date = new Date(message.timestamp || message.created_at);
+            formattedDate = date.toLocaleString();
+        }
+
+        this.debug(`Appending message ${messageId}, sent by me: ${isSentByMe}`);
 
         // Create the message element
         const messageElement = document.createElement('div');
         messageElement.className = 'flex ' + (isSentByMe ? 'justify-end' : '');
+
+        // Get sender name or initials
+        let senderInitials = 'UN';
+        if (isSentByMe) {
+            senderInitials = this.currentUserInitials;
+        } else if (message.sender_name) {
+            const nameParts = message.sender_name.split(' ');
+            if (nameParts.length > 1) {
+                senderInitials = nameParts[0].charAt(0) + nameParts[nameParts.length - 1].charAt(0);
+            } else {
+                senderInitials = message.sender_name.substring(0, 2);
+            }
+        }
+
+        // Create message HTML - ensures consistency between student and office modules
         messageElement.innerHTML = `
             <div class="message-bubble p-4 ${isSentByMe ? 'message-sent' : 'message-received'}"
-                 data-message-id="${message.message_id}" data-sender-id="${message.sender_id}">
+                 data-message-id="${messageId}" data-sender-id="${message.sender_id}">
                 <div class="flex items-center mb-2">
                     ${isSentByMe ? `
                         <div class="text-right ml-auto">
@@ -282,18 +387,18 @@ class InquiryChat {
                         </div>
                     ` : `
                         <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white">
-                            ${message.sender_name?.substring(0, 2) || 'U'}
+                            ${senderInitials}
                         </div>
                         <div class="ml-2">
                             <div class="text-xs font-semibold">
                                 ${message.sender_name || 'User'} 
-                                ${message.sender_role === 'student' ? '<span class="text-blue-600">(Student)</span>' : ''}
+                                ${(message.is_student || message.sender_role === 'student') ? '<span class="text-blue-600">(Student)</span>' : ''}
                             </div>
                             <div class="text-xs text-gray-500">${formattedDate}</div>
                         </div>
                     `}
                 </div>
-                <div class="text-sm">${message.content}</div>
+                <div class="text-sm">${(message.content || '').replace(/\n/g, '<br>')}</div>
                 
                 <!-- Message status indicator (only for sent messages) -->
                 ${isSentByMe ? `
@@ -302,7 +407,7 @@ class InquiryChat {
                         <i class="fas ${message.status === 'read' ? 'fa-check-double text-green-500' :
                     message.status === 'delivered' ? 'fa-check-double' : 'fa-check'}"></i>
                     </span>
-                    <span class="status-text ml-1">${message.status.charAt(0).toUpperCase() + message.status.slice(1)}</span>
+                    <span class="status-text ml-1">${(message.status || 'sent').charAt(0).toUpperCase() + (message.status || 'sent').slice(1)}</span>
                 </div>
                 ` : ''}
             </div>
@@ -365,6 +470,7 @@ class InquiryChat {
                     message_id: messageId,
                     sender_id: senderId
                 });
+                this.debug(`Marked message ${messageId} as read`);
 
                 // Remove from unread messages
                 this.unreadMessages = this.unreadMessages.filter(id => id !== messageId);
@@ -376,7 +482,7 @@ class InquiryChat {
      * Clean up event listeners and disconnect
      */
     destroy() {
-        // Leave the room
+        // Leave the inquiry room
         this.socket.emit('leave', { room: `inquiry_${this.inquiryId}` });
 
         // Clean up any timeouts
@@ -384,6 +490,6 @@ class InquiryChat {
             clearTimeout(this.typingTimeout);
         }
 
-        console.log(`InquiryChat destroyed for inquiry ${this.inquiryId}`);
+        this.debug(`InquiryChat destroyed for inquiry ${this.inquiryId}`);
     }
 }

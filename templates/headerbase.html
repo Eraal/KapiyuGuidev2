@@ -31,6 +31,10 @@
     />
     <link
       rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css"
+    />
+    <link
+      rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
     />
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
@@ -41,18 +45,7 @@
     <script src="{{ url_for('static', filename='js/chat-init.js') }}"></script>
     {% endif %} {% block extra_css %} {% endblock %}
 
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              marcellus: ["'Marcellus SC'", "serif"],
-              poppins: ["'Poppins'", "sans-serif"],
-            },
-          },
-        },
-      };
-    </script>
+  
 
     <!-- Additional Styles -->
     <style>

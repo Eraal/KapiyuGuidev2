@@ -497,108 +497,112 @@
     
     // Initialize the chat manager for real-time features
     if (window.io) {
+      console.log('DEBUG: Initializing Socket.IO for inquiry {{ inquiry.id }}');
       const socket = io();
+      
+      // Debug all incoming Socket.IO events
+      const originalOn = socket.on;
+      socket.on = function(eventName, callback) {
+        const wrappedCallback = function(...args) {
+          console.log(`DEBUG: Received Socket.IO event '${eventName}' with data:`, args);
+          return callback.apply(this, args);
+        };
+        return originalOn.call(this, eventName, wrappedCallback);
+      };
       
       // Join inquiry-specific room for real-time updates
       socket.on('connect', function() {
-        console.log('Connected to socket server, joining inquiry room');
+        console.log('DEBUG: Connected to socket server, joining inquiry room for inquiry {{ inquiry.id }}');
         socket.emit('join_inquiry_room', {
           inquiry_id: {{ inquiry.id }}
         });
+        
+        // Also join the office room
+        const officeId = {{ current_user.office_admin.office_id }};
+        socket.emit('join', { room: `office_${officeId}` });
+        console.log(`DEBUG: Also joining office_${officeId} room`);
       });
       
       // Handle successful room join confirmation
       socket.on('joined_inquiry_room', function(data) {
-        console.log('Successfully joined inquiry room:', data);
+        console.log('DEBUG: Successfully joined inquiry room:', data);
       });
       
-      // Listen for new student messages
-      socket.on('new_chat_message', function(data) {
-        console.log('Received new chat message:', data);
-        if (data.inquiry_id == {{ inquiry.id }} && data.is_student) {
-          // Create and add new message element
-          const messageElement = renderMessageElement(data);
-          
-          // Add to message container
-          const messageHistory = document.getElementById('messageHistory');
-          if (messageHistory) {
-            messageHistory.appendChild(messageElement);
-            // Scroll to bottom
-            messageHistory.scrollTop = messageHistory.scrollHeight;
-            
-            // Play notification sound
-            const notificationSound = document.getElementById('notificationSound');
-            if (notificationSound) {
-              notificationSound.play().catch(e => console.log('Error playing sound:', e));
-            }
-            
-            // Mark as delivered
-            socket.emit('chat_message_delivered', {
-              inquiry_id: data.inquiry_id,
-              message_id: data.message_id,
-              sender_id: data.sender_id
-            });
-          }
+      // Universal message handler for all incoming message events
+      function handleIncomingMessage(data) {
+        console.log('DEBUG: Processing incoming message:', data);
+        
+        // Check if this message is for our inquiry
+        if (data.inquiry_id != {{ inquiry.id }}) {
+          console.log('DEBUG: Message is for a different inquiry, ignoring');
+          return;
         }
-      });
-      
-      // Listen for direct new_message events
-      socket.on('new_message', function(data) {
-        console.log('Received new direct message:', data);
-        if (data.inquiry_id == {{ inquiry.id }} && data.is_student) {
-          // Create and add new message element
-          const messageElement = renderMessageElement(data);
-          
-          // Add to message container
-          const messageHistory = document.getElementById('messageHistory');
-          if (messageHistory) {
-            messageHistory.appendChild(messageElement);
-            // Scroll to bottom
-            messageHistory.scrollTop = messageHistory.scrollHeight;
-            
-            // Play notification sound
-            const notificationSound = document.getElementById('notificationSound');
-            if (notificationSound) {
-              notificationSound.play().catch(e => console.log('Error playing sound:', e));
-            }
-            
-            // Mark as delivered
-            socket.emit('chat_message_delivered', {
-              inquiry_id: data.inquiry_id,
-              message_id: data.message_id,
-              sender_id: data.sender_id
-            });
-          }
+        
+        // Skip messages from this user (those will be handled by the form submission)
+        if (data.sender_id == {{ current_user.id }}) {
+          console.log('DEBUG: Message is from current user, will be handled by form submission');
+          return;
         }
-      });
-      
-      // Listen for student_message_sent events
-      socket.on('student_message_sent', function(data) {
-        console.log('Received student_message_sent:', data);
-        if (data.inquiry_id == {{ inquiry.id }} && data.is_student) {
-          // Create and add new message element
-          const messageElement = renderMessageElement(data);
+        
+        console.log('DEBUG: Rendering new message element');
+        // Create and add new message element
+        const messageElement = renderMessageElement(data);
+        
+        // Add to message container
+        if (messageHistory) {
+          messageHistory.appendChild(messageElement);
+          // Scroll to bottom
+          messageHistory.scrollTop = messageHistory.scrollHeight;
           
-          // Add to message container
-          const messageHistory = document.getElementById('messageHistory');
-          if (messageHistory) {
-            messageHistory.appendChild(messageElement);
-            // Scroll to bottom
-            messageHistory.scrollTop = messageHistory.scrollHeight;
-            
-            // Play notification sound
-            const notificationSound = document.getElementById('notificationSound');
-            if (notificationSound) {
-              notificationSound.play().catch(e => console.log('Error playing sound:', e));
-            }
-            
-            // Mark as delivered
-            socket.emit('chat_message_delivered', {
-              inquiry_id: data.inquiry_id,
-              message_id: data.message_id,
-              sender_id: data.sender_id
-            });
+          // Play notification sound
+          const notificationSound = document.getElementById('notificationSound');
+          if (notificationSound) {
+            notificationSound.play().catch(e => console.log('Error playing sound:', e));
           }
+          
+          // Mark as delivered
+          socket.emit('chat_message_delivered', {
+            inquiry_id: data.inquiry_id,
+            message_id: data.message_id || data.id,
+            sender_id: data.sender_id
+          });
+          
+          console.log(`DEBUG: Message marked as delivered, message_id: ${data.message_id || data.id}`);
+        }
+      }
+      
+      // Listen for ALL possible message event types
+      socket.on('new_chat_message', handleIncomingMessage);
+      socket.on('new_message', handleIncomingMessage);
+      socket.on('student_message_sent', handleIncomingMessage);
+      
+      // Listen for typing indicators
+      socket.on('user_typing', function(data) {
+        console.log('DEBUG: User typing indicator received:', data);
+        if (data.inquiry_id != {{ inquiry.id }}) return;
+        
+        const typingIndicator = document.getElementById('typingIndicator');
+        if (!typingIndicator) return;
+        
+        if (data.is_typing) {
+          typingIndicator.innerHTML = `
+            <div class="flex items-center mb-4 ml-3 text-gray-500 text-sm">
+              <span class="mr-2">${data.user_name || 'Student'} is typing</span>
+              <div class="flex space-x-1">
+                <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0s"></div>
+                <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.4s"></div>
+              </div>
+            </div>
+          `;
+          typingIndicator.classList.remove('hidden');
+          
+          // Hide after 3 seconds if no update
+          setTimeout(function() {
+            typingIndicator.classList.add('hidden');
+          }, 3000);
+        } else {
+          typingIndicator.classList.add('hidden');
         }
       });
       
@@ -613,8 +617,36 @@
         currentUserId: {{ current_user.id }},
         currentUserRole: '{{ current_user.role }}',
         currentUserName: '{{ current_user.get_full_name() }}',
-        currentUserInitials: '{{ current_user.first_name[0] }}{{ current_user.last_name[0] }}'
+        currentUserInitials: '{{ current_user.first_name[0] }}{{ current_user.last_name[0] }}',
+        studentId: {{ inquiry.student.id }}  // Adding student ID for proper typing indicators
       });
+      
+      // Handle message form submission
+      const messageForm = document.getElementById('messageForm');
+      if (messageForm) {
+        messageForm.addEventListener('submit', function(e) {
+          // We'll let the form submit normally, but we need to track this message for socket updates
+          const messageInput = document.getElementById('messageInput');
+          const content = messageInput.value.trim();
+          
+          if (content) {
+            // Generate a temporary message ID for tracking 
+            // (it will be replaced with the real one from the server)
+            const tempMessageId = 'temp-' + Date.now();
+            
+            // Emit chat_message_sent event to notify others immediately
+            socket.emit('chat_message_sent', {
+              inquiry_id: {{ inquiry.id }},
+              message_id: tempMessageId,
+              student_id: {{ inquiry.student.id }},
+              content: content,
+              timestamp: new Date().toISOString()
+            });
+            
+            console.log('DEBUG: Emitted chat_message_sent event with temp id:', tempMessageId);
+          }
+        });
+      }
       
       // Function to render a new message element 
       function renderMessageElement(message) {
@@ -660,7 +692,7 @@
                 <div class="ml-2">
                   <div class="text-xs font-semibold">
                     ${message.sender_name}
-                    ${message.is_student ? '<span class="text-blue-600">(Student)</span>' : ''}
+                    ${(message.is_student || message.sender_role === 'student') ? '<span class="text-blue-600">(Student)</span>' : ''}
                   </div>
                   <div class="text-xs text-gray-500">
                     ${formattedDate}
@@ -678,7 +710,7 @@
                 </div>
               `}
             </div>
-            <div class="text-sm">${message.content.replace(/\n/g, '<br>')}</div>
+            <div class="text-sm">${(message.content || '').replace(/\n/g, '<br>')}</div>
             
             ${isSentByMe ? `
             <div class="message-status text-xs text-right mt-1">
@@ -686,7 +718,7 @@
                 <i class="fas ${message.status === 'read' ? 'fa-check-double text-green-500' : 
                                 message.status === 'delivered' ? 'fa-check-double' : 'fa-check'}"></i>
               </span>
-              <span class="status-text ml-1">${message.status.charAt(0).toUpperCase() + message.status.slice(1)}</span>
+              <span class="status-text ml-1">${(message.status || 'sent').charAt(0).toUpperCase() + (message.status || 'sent').slice(1)}</span>
             </div>
             ` : ''}
           </div>
