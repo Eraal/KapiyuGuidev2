@@ -334,15 +334,24 @@ def reply_to_inquiry(inquiry_id):
     # Get the current office admin's office
     office_admin = OfficeAdmin.query.filter_by(user_id=current_user.id).first()
     if not office_admin:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': False, 'message': 'Office admin not found'}), 403
         flash("You are not assigned to any office.", "error")
         return redirect(url_for('main.index'))
     
     # Fetch the inquiry and verify it belongs to this office
-    inquiry = Inquiry.query.filter_by(id=inquiry_id, office_id=office_admin.office_id).first_or_404()
+    inquiry = Inquiry.query.filter_by(id=inquiry_id, office_id=office_admin.office_id).first()
+    if not inquiry:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': False, 'message': 'Inquiry not found or access denied'}), 404
+        flash("Inquiry not found or access denied.", "error")
+        return redirect(url_for('office.office_inquiries'))
     
     # Get the message content from form submission
     message_content = request.form.get('message')
     if not message_content or message_content.strip() == '':
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
         flash("Message cannot be empty.", "error")
         return redirect(url_for('office.view_inquiry', inquiry_id=inquiry_id))
     
@@ -355,6 +364,28 @@ def reply_to_inquiry(inquiry_id):
         delivered_at=datetime.utcnow()
     )
     db.session.add(new_message)
+    db.session.flush()  # Get ID for attachments
+    
+    # Handle file attachments if any
+    file_paths = []
+    if 'attachments' in request.files:
+        files = request.files.getlist('attachments')
+        for file in files:
+            if file and file.filename:
+                from app.utils import save_attachment
+                file_path = save_attachment(file, 'messages')
+                if file_path:
+                    attachment = MessageAttachment(
+                        filename=file.filename,
+                        file_path=file_path,
+                        file_size=file.content_length if hasattr(file, 'content_length') else 0,
+                        file_type=file.content_type if hasattr(file, 'content_type') else None,
+                        uploaded_by_id=current_user.id,
+                        uploaded_at=datetime.utcnow(),
+                        message_id=new_message.id
+                    )
+                    db.session.add(attachment)
+                    file_paths.append(file_path)
     
     # Create notification for student
     notification = Notification(
@@ -391,10 +422,23 @@ def reply_to_inquiry(inquiry_id):
         except (ImportError, AttributeError) as e:
             # If websocket functionality is unavailable, continue without notification
             print(f"Websocket notification skipped: {str(e)}")
+            
+        # If it's an AJAX request, return JSON response
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'success': True, 
+                'message': 'Reply sent successfully',
+                'message_id': new_message.id
+            })
+            
     except Exception as e:
         db.session.rollback()
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'success': False, 'message': f'Error sending reply: {str(e)}'}), 500
         flash(f"Error sending reply: {str(e)}", "error")
+        return redirect(url_for('office.view_inquiry', inquiry_id=inquiry_id))
     
+    # If not an AJAX request, redirect (fallback for traditional form submission)
     return redirect(url_for('office.view_inquiry', inquiry_id=inquiry_id))
 
 

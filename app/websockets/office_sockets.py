@@ -148,7 +148,7 @@ def init_socketio():
         print(f"DEBUG: Message {message_id} also emitted to inquiry room: {room_name}")
             
     @socketio.on('staff_status')
-    def handle_staff_status(data):
+    def handle_staff_status(data, event=None):
         """Handle staff status updates (online, away, idle)"""
         if not current_user.is_authenticated or current_user.role != 'office_admin':
             return

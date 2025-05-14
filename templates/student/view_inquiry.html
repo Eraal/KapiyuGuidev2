@@ -1,49 +1,62 @@
 {% extends "student/student_base.html" %} {% block title %}View Inquiry -
 KapiyuGuide{% endblock %} {% block extra_head %}
+<link
+  href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
+  rel="stylesheet"
+/>
+<link
+  rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+/>
 <style>
+  /* Custom scrollbar styling */
+  .message-container::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .message-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .message-container::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.5);
+    border-radius: 20px;
+  }
+
+  /* Message bubble styling */
   .message-bubble {
     position: relative;
     max-width: 80%;
-    margin-bottom: 1rem;
-  }
-
-  .message-bubble::after {
-    content: "";
-    position: absolute;
-    bottom: 10px;
-    width: 0;
-    height: 0;
-    border: 8px solid transparent;
+    border-radius: 18px;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    word-break: break-word;
   }
 
   .message-sent {
     margin-left: auto;
-    background-color: #dbeafe;
-    border-radius: 18px 18px 4px 18px;
-  }
-
-  .message-sent::after {
-    right: -15px;
-    border-left-color: #dbeafe;
+    background-color: #3b82f6;
+    color: white;
+    border-bottom-right-radius: 4px;
   }
 
   .message-received {
     margin-right: auto;
     background-color: #f3f4f6;
-    border-radius: 18px 18px 18px 4px;
+    color: #1f2937;
+    border-bottom-left-radius: 4px;
   }
 
-  .message-received::after {
-    left: -15px;
-    border-right-color: #f3f4f6;
-  }
-
+  /* Attachment styling */
   .attachment-preview {
-    max-width: 100px;
-    max-height: 100px;
-    border-radius: 4px;
+    max-width: 180px;
+    max-height: 180px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid rgba(0, 0, 0, 0.1);
   }
 
+  /* Status badges */
   .inquiry-status-pending {
     background-color: #fef3c7;
     color: #92400e;
@@ -63,9 +76,83 @@ KapiyuGuide{% endblock %} {% block extra_head %}
     background-color: #ede9fe;
     color: #5b21b6;
   }
+
+  /* Typing indicator dots animation */
+  .typing-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #9ca3af;
+    margin-right: 3px;
+    animation: typing-dot 1.4s infinite ease-in-out;
+  }
+
+  .typing-dot:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes typing-dot {
+    0%,
+    60%,
+    100% {
+      transform: translateY(0);
+    }
+    30% {
+      transform: translateY(-4px);
+    }
+  }
+
+  /* File attachment input styling */
+  .file-input-label {
+    transition: all 0.2s ease;
+  }
+
+  .file-input-label:hover {
+    background-color: #f3f4f6;
+  }
+
+  /* Make chat interface take up full available height */
+  .chat-wrapper {
+    height: calc(100vh - 160px);
+    min-height: 500px;
+  }
+
+  /* Message fading effect */
+  .message-fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .message-bubble {
+      max-width: 90%;
+    }
+
+    .chat-wrapper {
+      height: calc(100vh - 120px);
+    }
+  }
 </style>
 {% endblock %} {% block content %}
-<div class="container mx-auto" data-inquiry-id="{{ inquiry.id }}">
+<div class="container mx-auto px-4 py-6" data-inquiry-id="{{ inquiry.id }}">
   <!-- Breadcrumb Navigation -->
   <div class="flex items-center text-sm text-gray-600 mb-4">
     <a href="{{ url_for('student.dashboard') }}" class="hover:text-blue-600"
@@ -76,78 +163,79 @@ KapiyuGuide{% endblock %} {% block extra_head %}
       >Inquiries</a
     >
     <i class="fas fa-chevron-right mx-2 text-xs"></i>
-    <span class="text-gray-800 font-medium">{{ inquiry.subject }}</span>
+    <span class="text-gray-800 font-medium truncate max-w-xs"
+      >{{ inquiry.subject }}</span
+    >
   </div>
 
-  <!-- Main Content Grid -->
-  <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-    <!-- Left Column - Inquiry Details -->
-    <div class="lg:col-span-1">
-      <div class="bg-white rounded-xl shadow-sm mb-6">
-        <div class="px-6 py-4 border-b">
-          <h2 class="text-lg font-bold text-gray-800">Inquiry Details</h2>
+  <!-- Main Content -->
+  <div class="chat-wrapper grid grid-cols-1 lg:grid-cols-4 gap-4">
+    <!-- Left Sidebar - Details & Related Inquiries -->
+    <div class="lg:col-span-1 space-y-4">
+      <!-- Inquiry Details Card -->
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div class="px-4 py-3 bg-gray-50 border-b border-gray-100">
+          <h2 class="text-lg font-semibold text-gray-800">Inquiry Details</h2>
         </div>
-        <div class="p-6">
-          <dl class="space-y-4">
-            <div>
-              <dt class="text-sm font-medium text-gray-500">Subject</dt>
-              <dd class="mt-1 text-sm text-gray-900">{{ inquiry.subject }}</dd>
-            </div>
-            <div>
-              <dt class="text-sm font-medium text-gray-500">Office</dt>
-              <dd class="mt-1 text-sm text-gray-900">
-                {{ inquiry.office.name }}
-              </dd>
-            </div>
-            <div>
-              <dt class="text-sm font-medium text-gray-500">Status</dt>
-              <dd class="mt-1">
-                <span
-                  class="px-2 py-1 text-xs rounded-full inquiry-status-{{ inquiry.status }}"
+        <div class="p-4 space-y-3">
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Subject</h3>
+            <p class="text-sm text-gray-900 mt-1">{{ inquiry.subject }}</p>
+          </div>
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Office</h3>
+            <p class="text-sm text-gray-900 mt-1">{{ inquiry.office.name }}</p>
+          </div>
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Status</h3>
+            <span
+              class="px-2 py-1 text-xs rounded-full inquiry-status-{{ inquiry.status }} inline-block mt-1"
+            >
+              {{ inquiry.status|replace('_', ' ')|title }}
+            </span>
+          </div>
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Date Submitted</h3>
+            <p class="text-sm text-gray-900 mt-1">
+              {{ inquiry.created_at.strftime('%B %d, %Y') }}
+            </p>
+          </div>
+
+          <!-- Concern Types -->
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Concern Types</h3>
+            {% if inquiry.concerns %}
+            <ul class="text-sm text-gray-900 mt-1 space-y-1">
+              {% for concern in inquiry.concerns %}
+              <li>
+                {{ concern.concern_type.name }} {% if
+                concern.other_specification %}
+                <span class="text-gray-500 italic"
+                  >({{ concern.other_specification }})</span
                 >
-                  {{ inquiry.status|replace('_', ' ')|title }}
-                </span>
-              </dd>
-            </div>
-            <div>
-              <dt class="text-sm font-medium text-gray-500">Date Submitted</dt>
-              <dd class="mt-1 text-sm text-gray-900">
-                {{ inquiry.created_at.strftime('%B %d, %Y') }}
-              </dd>
-            </div>
-            <div>
-              <dt class="text-sm font-medium text-gray-500">Concern Types</dt>
-              <dd class="mt-1 text-sm">
-                {% if inquiry.concerns %}
-                <ul class="space-y-1">
-                  {% for concern in inquiry.concerns %}
-                  <li class="text-gray-900">
-                    {{ concern.concern_type.name }} {% if
-                    concern.other_specification %}
-                    <span class="text-gray-500 italic"
-                      >({{ concern.other_specification }})</span
-                    >
-                    {% endif %}
-                  </li>
-                  {% endfor %}
-                </ul>
-                {% else %}
-                <span class="text-gray-500">No specific concerns listed</span>
                 {% endif %}
-              </dd>
-            </div>
-          </dl>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-sm text-gray-500 mt-1">
+              No specific concerns listed
+            </p>
+            {% endif %}
+          </div>
         </div>
       </div>
 
       <!-- Related Inquiries -->
       {% if related_inquiries %}
-      <div class="bg-white rounded-xl shadow-sm">
-        <div class="px-6 py-4 border-b">
-          <h2 class="text-lg font-bold text-gray-800">Related Inquiries</h2>
+      <div
+        class="bg-white rounded-xl shadow-sm overflow-hidden hidden lg:block"
+      >
+        <div class="px-4 py-3 bg-gray-50 border-b border-gray-100">
+          <h2 class="text-lg font-semibold text-gray-800">Related Inquiries</h2>
         </div>
-        <div class="p-6">
-          <ul class="space-y-4">
+        <div class="p-4">
+          <ul class="space-y-2">
             {% for related in related_inquiries %}
             <li>
               <a
@@ -157,14 +245,58 @@ KapiyuGuide{% endblock %} {% block extra_head %}
                 <p class="text-sm font-medium text-blue-600 truncate">
                   {{ related.subject }}
                 </p>
-                <p class="text-xs text-gray-500 mt-1">
-                  {{ related.created_at.strftime('%b %d, %Y') }}
+                <div class="flex justify-between items-center mt-1">
+                  <span class="text-xs text-gray-500"
+                    >{{ related.created_at.strftime('%b %d, %Y') }}</span
+                  >
+                  <span
+                    class="inline-block px-2 py-0.5 text-xs rounded-full inquiry-status-{{ related.status }}"
+                  >
+                    {{ related.status|replace('_', ' ')|title }}
+                  </span>
+                </div>
+              </a>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Mobile Only - Toggle Related Inquiries -->
+      {% if related_inquiries %}
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden lg:hidden">
+        <button
+          id="toggleRelatedBtn"
+          class="w-full px-4 py-3 flex justify-between items-center bg-gray-50 border-b border-gray-100"
+        >
+          <h2 class="text-lg font-semibold text-gray-800">Related Inquiries</h2>
+          <i
+            class="fas fa-chevron-down transition-transform"
+            id="toggleRelatedIcon"
+          ></i>
+        </button>
+        <div class="p-4 hidden" id="relatedInquiriesContainer">
+          <ul class="space-y-2">
+            {% for related in related_inquiries %}
+            <li>
+              <a
+                href="{{ url_for('student.view_inquiry', inquiry_id=related.id) }}"
+                class="block hover:bg-gray-50 p-3 rounded-md transition"
+              >
+                <p class="text-sm font-medium text-blue-600 truncate">
+                  {{ related.subject }}
                 </p>
-                <span
-                  class="mt-2 inline-block px-2 py-0.5 text-xs rounded-full inquiry-status-{{ related.status }}"
-                >
-                  {{ related.status|replace('_', ' ')|title }}
-                </span>
+                <div class="flex justify-between items-center mt-1">
+                  <span class="text-xs text-gray-500"
+                    >{{ related.created_at.strftime('%b %d, %Y') }}</span
+                  >
+                  <span
+                    class="inline-block px-2 py-0.5 text-xs rounded-full inquiry-status-{{ related.status }}"
+                  >
+                    {{ related.status|replace('_', ' ')|title }}
+                  </span>
+                </div>
               </a>
             </li>
             {% endfor %}
@@ -174,153 +306,208 @@ KapiyuGuide{% endblock %} {% block extra_head %}
       {% endif %}
     </div>
 
-    <!-- Right Column - Messages -->
-    <div class="lg:col-span-3">
-      <div class="bg-white rounded-xl shadow-sm">
-        <div class="px-6 py-4 border-b flex items-center justify-between">
-          <h2 class="text-lg font-bold text-gray-800">Conversation</h2>
-          <a
-            href="{{ url_for('student.inquiries') }}"
-            class="text-blue-600 hover:text-blue-800 text-sm flex items-center"
-          >
-            <i class="fas fa-arrow-left mr-1"></i> Back to Inquiries
-          </a>
+    <!-- Right Column - Chat Messages -->
+    <div
+      class="lg:col-span-3 flex flex-col bg-white rounded-xl shadow-sm overflow-hidden"
+    >
+      <!-- Chat Header -->
+      <div
+        class="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between"
+      >
+        <div>
+          <h2 class="text-lg font-semibold text-gray-800">
+            {{ inquiry.subject }}
+          </h2>
+          <p class="text-xs text-gray-500">
+            Conversation with {{ inquiry.office.name }}
+          </p>
         </div>
-        <div class="p-6">
-          <!-- Messages History -->
-          <div
-            class="space-y-6 mb-6 max-h-[500px] overflow-y-auto"
-            id="messageHistory"
-          >
-            {% if has_more_messages %}
-            <div id="load-more-container" class="flex justify-center mb-4">
-              <div class="text-xs text-gray-500" id="scroll-indicator">
-                <i class="fas fa-arrow-up mr-1 animate-bounce"></i>
-                Scroll up to load older messages
-              </div>
-            </div>
-            {% endif %} {% for message in messages %}
+        <a
+          href="{{ url_for('student.inquiries') }}"
+          class="text-blue-600 hover:text-blue-800 text-sm flex items-center"
+        >
+          <i class="fas fa-arrow-left mr-1"></i> Back
+        </a>
+      </div>
+
+      <!-- Messages Container -->
+      <div class="flex-grow overflow-hidden flex flex-col">
+        <!-- Message History -->
+        <div
+          class="message-container flex-grow overflow-y-auto p-4"
+          id="messageHistory"
+        >
+          {% if has_more_messages %}
+          <div id="load-more-container" class="flex justify-center mb-4">
             <div
-              class="flex {% if message.sender_id == current_user.id %}justify-end{% endif %}"
+              class="bg-blue-50 text-blue-600 px-3 py-2 rounded-full text-xs font-medium animate-pulse cursor-pointer"
+              id="scroll-indicator"
             >
-              <div
-                class="message-bubble p-4 {% if message.sender_id == current_user.id %}message-sent{% else %}message-received{% endif %}"
-                data-message-id="{{ message.id }}"
-                data-sender-id="{{ message.sender_id }}"
-              >
-                <div class="flex items-center mb-2">
-                  {% if message.sender_id != current_user.id %}
-                  <div
-                    class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white"
-                  >
-                    {{ message.sender.first_name[0] }}{{
-                    message.sender.last_name[0] }}
-                  </div>
-                  <div class="ml-2">
-                    <div class="text-xs font-semibold">
-                      {{ message.sender.get_full_name() }} {% if
-                      message.sender.role == 'office_admin' %}
-                      <span class="text-blue-600">(Office Staff)</span>
-                      {% endif %}
-                    </div>
-                    <div class="text-xs text-gray-500">
-                      {{ message.created_at.strftime('%b %d, %Y %I:%M %p') }}
-                    </div>
-                  </div>
-                  {% else %}
-                  <div class="text-right ml-auto">
-                    <div class="text-xs font-semibold">You</div>
-                    <div class="text-xs text-gray-500">
-                      {{ message.created_at.strftime('%b %d, %Y %I:%M %p') }}
-                    </div>
-                  </div>
-                  <div
-                    class="h-8 w-8 rounded-full bg-green-500 ml-2 flex items-center justify-center text-white"
-                  >
-                    {{ current_user.first_name[0] }}{{ current_user.last_name[0]
-                    }}
-                  </div>
-                  {% endif %}
-                </div>
-                <div class="text-sm">{{ message.content|nl2br }}</div>
-
-                <!-- Message status indicator (only for sent messages) -->
-                {% if message.sender_id == current_user.id %}
-                <div class="message-status text-xs text-right mt-1">
-                  <span class="status-icon">
-                    <i
-                      class="fas {% if message.status == 'read' %}fa-check-double text-blue-500{% elif message.status == 'delivered' %}fa-check-double{% else %}fa-check{% endif %}"
-                    ></i>
-                  </span>
-                  <span class="status-text ml-1"
-                    >{{ message.status|title }}</span
-                  >
-                </div>
-                {% endif %}
-
-                <!-- Message Attachments -->
-                {% if message.attachments %}
-                <div class="mt-3 flex flex-wrap gap-2">
-                  {% for attachment in message.attachments %}
-                  <a
-                    href="{{ url_for('static', filename=attachment.file_path) }}"
-                    target="_blank"
-                    class="block"
-                  >
-                    {% if attachment.file_path.endswith(('.jpg', '.jpeg',
-                    '.png', '.gif')) %}
-                    <img
-                      src="{{ url_for('static', filename=attachment.file_path) }}"
-                      alt="Attachment"
-                      class="attachment-preview"
-                    />
-                    {% else %}
-                    <div class="bg-gray-100 p-2 rounded flex items-center">
-                      {% if attachment.file_path.endswith('.pdf') %}
-                      <i class="far fa-file-pdf text-red-500 mr-1"></i>
-                      {% elif attachment.file_path.endswith(('.doc', '.docx'))
-                      %}
-                      <i class="far fa-file-word text-blue-500 mr-1"></i>
-                      {% else %}
-                      <i class="far fa-file text-gray-500 mr-1"></i>
-                      {% endif %}
-                      <span class="text-xs"
-                        >{{ attachment.filename|default('Attachment') }}</span
-                      >
-                    </div>
-                    {% endif %}
-                  </a>
-                  {% endfor %}
-                </div>
-                {% endif %}
-              </div>
+              <i class="fas fa-arrow-up mr-1"></i>
+              Scroll up for older messages
             </div>
-            {% endfor %}
+          </div>
+          {% endif %}
+
+          <!-- Date Separator (optional) -->
+          <div class="flex justify-center my-3">
+            <div
+              class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs"
+            >
+              Today
+            </div>
           </div>
 
-          <!-- Typing indicator -->
-          <div id="typingIndicator" class="hidden"></div>
+          <!-- Message Bubbles -->
+          {% for message in messages %}
+          <div
+            class="flex {% if message.sender_id == current_user.id %}justify-end{% endif %} mb-4 message-fade-in"
+          >
+            {% if message.sender_id != current_user.id %}
+            <!-- Avatar for received messages -->
+            <div class="self-end mr-2">
+              <div
+                class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white shadow-sm"
+              >
+                {{ message.sender.first_name[0] }}{{ message.sender.last_name[0]
+                }}
+              </div>
+            </div>
+            {% endif %}
 
-          <!-- Message Input Form -->
+            <div
+              class="message-bubble p-3 {% if message.sender_id == current_user.id %}message-sent{% else %}message-received{% endif %}"
+              data-message-id="{{ message.id }}"
+              data-sender-id="{{ message.sender_id }}"
+            >
+              <!-- Sender info -->
+              <div class="flex items-center mb-1">
+                {% if message.sender_id != current_user.id %}
+                <div>
+                  <span class="text-xs font-semibold">
+                    {{ message.sender.get_full_name() }} {% if
+                    message.sender.role == 'office_admin' %}
+                    <span class="text-blue-600">(Office Staff)</span>
+                    {% endif %}
+                  </span>
+                </div>
+                {% endif %}
+              </div>
+
+              <!-- Message content -->
+              <div class="text-sm">{{ message.content|nl2br }}</div>
+
+              <!-- Message Attachments -->
+              {% if message.attachments %}
+              <div class="mt-2 flex flex-wrap gap-2">
+                {% for attachment in message.attachments %}
+                <a
+                  href="{{ url_for('static', filename=attachment.file_path) }}"
+                  target="_blank"
+                  class="block"
+                >
+                  {% if attachment.file_path.endswith(('.jpg', '.jpeg', '.png',
+                  '.gif')) %}
+                  <img
+                    src="{{ url_for('static', filename=attachment.file_path) }}"
+                    alt="Attachment"
+                    class="attachment-preview"
+                  />
+                  {% else %}
+                  <div
+                    class="bg-white bg-opacity-20 backdrop-filter backdrop-blur-lg px-3 py-2 rounded-md flex items-center"
+                  >
+                    {% if attachment.file_path.endswith('.pdf') %}
+                    <i class="far fa-file-pdf text-red-500 mr-2"></i>
+                    {% elif attachment.file_path.endswith(('.doc', '.docx')) %}
+                    <i class="far fa-file-word text-blue-500 mr-2"></i>
+                    {% else %}
+                    <i class="far fa-file text-gray-500 mr-2"></i>
+                    {% endif %}
+                    <span class="text-xs truncate max-w-xs"
+                      >{{ attachment.filename|default('Attachment') }}</span
+                    >
+                  </div>
+                  {% endif %}
+                </a>
+                {% endfor %}
+              </div>
+              {% endif %}
+
+              <!-- Timestamp and status -->
+              <div class="flex justify-end items-center mt-1 space-x-1">
+                <span class="text-xs opacity-70"
+                  >{{ message.created_at.strftime('%I:%M %p') }}</span
+                >
+
+                {% if message.sender_id == current_user.id %}
+                <span class="status-icon ml-1">
+                  <i
+                    class="fas {% if message.status == 'read' %}fa-check-double text-blue-300{% elif message.status == 'delivered' %}fa-check-double text-white opacity-70{% else %}fa-check text-white opacity-70{% endif %} text-xs"
+                  ></i>
+                </span>
+                {% endif %}
+              </div>
+            </div>
+
+            {% if message.sender_id == current_user.id %}
+            <!-- Avatar for sent messages -->
+            <div class="self-end ml-2">
+              <div
+                class="h-8 w-8 rounded-full bg-green-500 flex items-center justify-center text-white shadow-sm"
+              >
+                {{ current_user.first_name[0] }}{{ current_user.last_name[0] }}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+
+          <!-- Typing indicator -->
+          <div id="typingIndicator" class="flex items-center mb-4 hidden">
+            <div
+              class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white mr-2 shadow-sm"
+            >
+              <i class="fas fa-keyboard"></i>
+            </div>
+            <div class="message-bubble message-received py-2 px-4">
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Message Input Form -->
+        <div class="border-t border-gray-100 p-3 bg-gray-50">
           <form
             action="{{ url_for('student.reply_to_inquiry', inquiry_id=inquiry.id) }}"
             method="post"
             enctype="multipart/form-data"
-            class="mt-4"
             id="messageForm"
+            class="flex flex-col"
           >
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-            <div class="relative">
+
+            <!-- Message textarea -->
+            <div class="relative mb-2">
               <textarea
                 name="message"
-                rows="4"
-                placeholder="Type your reply here..."
+                rows="2"
+                placeholder="Type your message..."
                 id="messageInput"
-                class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
+                class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               ></textarea>
             </div>
-            <div class="flex items-center justify-between mt-2">
+
+            <!-- File attachments preview -->
+            <div
+              id="replyAttachmentPreview"
+              class="flex flex-wrap gap-2 mb-2"
+            ></div>
+
+            <!-- Action buttons -->
+            <div class="flex items-center justify-between">
               <div class="relative">
                 <input
                   type="file"
@@ -331,22 +518,20 @@ KapiyuGuide{% endblock %} {% block extra_head %}
                 />
                 <label
                   for="replyAttachments"
-                  class="flex items-center cursor-pointer text-sm text-gray-600 hover:text-blue-600"
+                  class="file-input-label flex items-center cursor-pointer text-gray-600 hover:text-blue-600 px-3 py-2 rounded-md"
                 >
-                  <i class="fas fa-paperclip mr-1"></i>
-                  Attach Files
+                  <i class="fas fa-paperclip mr-2"></i>
+                  <span class="text-sm">Files</span>
                 </label>
-                <div
-                  id="replyAttachmentPreview"
-                  class="mt-2 flex flex-wrap gap-2"
-                ></div>
               </div>
+
               <button
                 type="submit"
-                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center"
                 id="sendButton"
               >
-                Send Reply <i class="fas fa-paper-plane ml-1"></i>
+                <span>Send</span>
+                <i class="fas fa-paper-plane ml-2"></i>
               </button>
             </div>
           </form>
@@ -356,7 +541,7 @@ KapiyuGuide{% endblock %} {% block extra_head %}
   </div>
 </div>
 
-<!-- Add notification sound -->
+<!-- Audio notifications -->
 <audio id="notificationSound" preload="auto">
   <source
     src="{{ url_for('static', filename='sounds/notification.mp3') }}"
@@ -388,6 +573,19 @@ KapiyuGuide{% endblock %} {% block extra_head %}
       }
     }
 
+    // Toggle related inquiries on mobile
+    const toggleRelatedBtn = document.getElementById('toggleRelatedBtn');
+    const relatedInquiriesContainer = document.getElementById('relatedInquiriesContainer');
+    const toggleRelatedIcon = document.getElementById('toggleRelatedIcon');
+
+    if (toggleRelatedBtn && relatedInquiriesContainer && toggleRelatedIcon) {
+      toggleRelatedBtn.addEventListener('click', function() {
+        relatedInquiriesContainer.classList.toggle('hidden');
+        toggleRelatedIcon.classList.toggle('transform');
+        toggleRelatedIcon.classList.toggle('rotate-180');
+      });
+    }
+
     // Handle file attachments preview for replies
     const replyAttachments = document.getElementById("replyAttachments");
     const replyAttachmentPreview = document.getElementById("replyAttachmentPreview");
@@ -412,27 +610,26 @@ KapiyuGuide{% endblock %} {% block extra_head %}
           }
 
           const preview = document.createElement("div");
-          preview.className =
-            "bg-gray-100 p-2 rounded-md flex items-center text-sm";
+          preview.className = "bg-gray-100 px-3 py-2 rounded-md flex items-center text-sm";
 
           // Preview Icon
           const icon = document.createElement("i");
           if (file.type.match("image.*")) {
-            icon.className = "far fa-image text-blue-500 mr-1";
+            icon.className = "far fa-image text-blue-500 mr-2";
           } else if (file.type === "application/pdf") {
-            icon.className = "far fa-file-pdf text-red-500 mr-1";
+            icon.className = "far fa-file-pdf text-red-500 mr-2";
           } else if (
-            file.type ===
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+            file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
             file.type === "application/msword"
           ) {
-            icon.className = "far fa-file-word text-blue-500 mr-1";
+            icon.className = "far fa-file-word text-blue-500 mr-2";
           } else {
-            icon.className = "far fa-file text-gray-500 mr-1";
+            icon.className = "far fa-file text-gray-500 mr-2";
           }
           preview.appendChild(icon);
 
           const fileName = document.createElement("span");
+          fileName.className = "text-xs";
           fileName.textContent =
             file.name.length > 15
               ? file.name.substring(0, 15) + "..."
@@ -442,7 +639,8 @@ KapiyuGuide{% endblock %} {% block extra_head %}
           const removeBtn = document.createElement("button");
           removeBtn.className = "ml-2 text-red-500 hover:text-red-700";
           removeBtn.innerHTML = '<i class="fas fa-times"></i>';
-          removeBtn.addEventListener("click", function () {
+          removeBtn.addEventListener("click", function (e) {
+            e.preventDefault();
             preview.remove();
             // Note: This doesn't actually remove the file from the input
             // You would need a more complex solution to truly remove files
@@ -451,6 +649,22 @@ KapiyuGuide{% endblock %} {% block extra_head %}
 
           replyAttachmentPreview.appendChild(preview);
         });
+      });
+    }
+
+    // Auto-resize textarea
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+      messageInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+        // Limit to a max height
+        if (this.scrollHeight > 150) {
+          this.style.height = '150px';
+          this.style.overflowY = 'auto';
+        } else {
+          this.style.overflowY = 'hidden';
+        }
       });
     }
 
@@ -472,28 +686,97 @@ KapiyuGuide{% endblock %} {% block extra_head %}
         currentUserInitials: '{{ current_user.first_name[0] }}{{ current_user.last_name[0] }}'
       });
 
+      // Handle message form submission
+      const messageForm = document.getElementById('messageForm');
+      if (messageForm) {
+        messageForm.addEventListener('submit', function(e) {
+          e.preventDefault(); // Prevent default form submission
+
+          const messageInput = document.getElementById('messageInput');
+          const content = messageInput.value.trim();
+
+          if (!content) return; // Don't submit empty messages
+
+          // Create FormData object for sending files
+          const formData = new FormData(this);
+
+          // Generate a temporary message ID
+          const tempMessageId = 'temp-' + Date.now();
+
+          // Create and display the temporary message immediately
+          const tempMessage = {
+            id: tempMessageId,
+            content: content,
+            sender_id: {{ current_user.id }},
+            sender_name: '{{ current_user.get_full_name() }}',
+            timestamp: new Date(),
+            status: 'sent'
+          };
+
+          // Add the temporary message to the UI
+          inquiryChat.appendMessage(tempMessage);
+
+          // Clear the input field
+          messageInput.value = '';
+          messageInput.style.height = 'auto';
+
+          // Clear attachment previews
+          const previewContainer = document.getElementById('replyAttachmentPreview');
+          if (previewContainer) {
+            previewContainer.innerHTML = '';
+          }
+
+          // Reset file input
+          const fileInput = document.getElementById('replyAttachments');
+          if (fileInput) {
+            fileInput.value = '';
+          }
+
+          // Submit the form via AJAX
+          fetch('{{ url_for('student.reply_to_inquiry', inquiry_id=inquiry.id) }}', {
+            method: 'POST',
+            body: formData,
+            credentials: 'same-origin'
+          })
+          .then(response => {
+            if (!response.ok) {
+              throw new Error('Failed to send message');
+            }
+            return response.json().catch(() => ({})); // Handle case when response is not JSON
+          })
+          .then(data => {
+            console.log('Message sent successfully');
+            // The WebSocket system will handle the real-time update
+          })
+          .catch(error => {
+            console.error('Error sending message:', error);
+            // Optionally show an error message to the user
+          });
+        });
+      }
+
       // Initialize progressive message loading
       if ({{ has_more_messages|default('false')|tojson }}) {
-        // Show loading indicator initially
-        const scrollIndicator = document.getElementById('scroll-indicator');
-        if (scrollIndicator) {
-          scrollIndicator.style.display = 'block';
-        }
-
-        // Function to render a message element
+        // Function to render a message element - carefully preserved from original code but styled to match new design
         const renderMessage = (message) => {
           const isSentByMe = message.sender_id == {{ current_user.id }};
           const messageElement = document.createElement('div');
-          messageElement.className = `flex ${isSentByMe ? 'justify-end' : ''}`;
+          messageElement.className = `flex ${isSentByMe ? 'justify-end' : ''} mb-4 message-fade-in`;
 
           // Format date nicely
           let formattedDate = 'Unknown date';
+          let timeOnly = 'Unknown time';
           if (message.timestamp) {
             const date = new Date(message.timestamp);
             formattedDate = date.toLocaleString('default', {
               month: 'short',
               day: 'numeric',
               year: 'numeric',
+              hour: 'numeric',
+              minute: 'numeric',
+              hour12: true
+            });
+            timeOnly = date.toLocaleString('default', {
               hour: 'numeric',
               minute: 'numeric',
               hour12: true
@@ -511,79 +794,119 @@ KapiyuGuide{% endblock %} {% block extra_head %}
             }
           }
 
-          // Create message HTML
-          messageElement.innerHTML = `
-            <div class="message-bubble p-4 ${isSentByMe ? 'message-sent' : 'message-received'}"
-                data-message-id="${message.id}"
-                data-sender-id="${message.sender_id}">
-              <div class="flex items-center mb-2">
-                ${!isSentByMe ? `
-                  <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white">
-                    ${senderInitials}
-                  </div>
-                  <div class="ml-2">
-                    <div class="text-xs font-semibold">
-                      ${message.sender_name}
-                      ${message.is_student ? '' : '<span class="text-blue-600">(Office Staff)</span>'}
-                    </div>
-                    <div class="text-xs text-gray-500">
-                      ${formattedDate}
-                    </div>
-                  </div>
-                ` : `
-                  <div class="text-right ml-auto">
-                    <div class="text-xs font-semibold">You</div>
-                    <div class="text-xs text-gray-500">
-                      ${formattedDate}
-                    </div>
-                  </div>
-                  <div class="h-8 w-8 rounded-full bg-green-500 ml-2 flex items-center justify-center text-white">
-                    {{ current_user.first_name[0] }}{{ current_user.last_name[0] }}
-                  </div>
-                `}
+          // Create HTML structure matching our new design
+          let html = '';
+
+          // Avatar for received messages
+          if (!isSentByMe) {
+            html += `
+              <div class="self-end mr-2">
+                <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white shadow-sm">
+                  ${senderInitials}
+                </div>
               </div>
+            `;
+          }
+
+          // Message bubble
+          html += `
+            <div class="message-bubble p-3 ${isSentByMe ? 'message-sent' : 'message-received'}"
+                 data-message-id="${message.id}"
+                 data-sender-id="${message.sender_id}">
+
+              <!-- Sender info -->
+              <div class="flex items-center mb-1">
+                ${!isSentByMe ? `
+                <div>
+                  <span class="text-xs font-semibold">
+                    ${message.sender_name}
+                    ${message.is_staff ? '<span class="text-blue-600">(Office Staff)</span>' : ''}
+                  </span>
+                </div>
+                ` : ''}
+              </div>
+
+              <!-- Message content -->
               <div class="text-sm">${message.content.replace(/\n/g, '<br>')}</div>
 
-              ${isSentByMe ? `
-              <div class="message-status text-xs text-right mt-1">
-                <span class="status-icon">
-                  <i class="fas ${message.status === 'read' ? 'fa-check-double text-blue-500' :
-                                  message.status === 'delivered' ? 'fa-check-double' : 'fa-check'}"></i>
-                </span>
-                <span class="status-text ml-1">${message.status.charAt(0).toUpperCase() + message.status.slice(1)}</span>
+              <!-- Message Attachments -->
+              ${message.attachments ? `
+              <div class="mt-2 flex flex-wrap gap-2">
+                ${message.attachments.map(attachment => `
+                  <a href="${attachment.file_path}" target="_blank" class="block">
+                    ${attachment.file_path.endsWith('.jpg') || attachment.file_path.endsWith('.jpeg') ||
+                      attachment.file_path.endsWith('.png') || attachment.file_path.endsWith('.gif') ?
+                      `<img src="${attachment.file_path}" alt="Attachment" class="attachment-preview" />` :
+                      `<div class="bg-white bg-opacity-20 backdrop-filter backdrop-blur-lg px-3 py-2 rounded-md flex items-center">
+                        ${attachment.file_path.endsWith('.pdf') ?
+                          '<i class="far fa-file-pdf text-red-500 mr-2"></i>' :
+                          attachment.file_path.endsWith('.doc') || attachment.file_path.endsWith('.docx') ?
+                          '<i class="far fa-file-word text-blue-500 mr-2"></i>' :
+                          '<i class="far fa-file text-gray-500 mr-2"></i>'}
+                        <span class="text-xs truncate max-w-xs">${attachment.filename || 'Attachment'}</span>
+                      </div>`
+                    }
+                  </a>
+                `).join('')}
               </div>
               ` : ''}
+
+              <!-- Timestamp and status -->
+              <div class="flex justify-end items-center mt-1 space-x-1">
+                <span class="text-xs opacity-70">${timeOnly}</span>
+                ${isSentByMe ? `
+                <span class="status-icon ml-1">
+                  <i class="fas ${message.status === 'read' ? 'fa-check-double text-blue-300' :
+                               message.status === 'delivered' ? 'fa-check-double text-white opacity-70' :
+                               'fa-check text-white opacity-70'} text-xs"></i>
+                </span>
+                ` : ''}
+              </div>
             </div>
           `;
 
+          // Avatar for sent messages
+          if (isSentByMe) {
+            html += `
+              <div class="self-end ml-2">
+                <div class="h-8 w-8 rounded-full bg-green-500 flex items-center justify-center text-white shadow-sm">
+                  {{ current_user.first_name[0] }}{{ current_user.last_name[0] }}
+                </div>
+              </div>
+            `;
+          }
+
+          messageElement.innerHTML = html;
           return messageElement;
         };
 
-        // Initialize the progressive chat loader
-        const chatLoader = new ProgressiveChatLoader({
+        // Create a progressive chat loader
+        const progressiveChatLoader = new ProgressiveChatLoader({
           messageContainer: messageHistory,
           inquiryId: {{ inquiry.id }},
           renderMessage: renderMessage,
           apiEndpoint: "{{ url_for('student.get_older_messages', inquiry_id=inquiry.id) }}",
-          loadThreshold: 150,
-          batchSize: 6
+          loadThreshold: 100, // Load more when within 100px of top
+          batchSize: 6,
         });
 
-        // Hide scroll indicator after first load
-        chatLoader.onLoadComplete = function(messages) {
-          const indicator = document.getElementById('scroll-indicator');
-          if (indicator) {
-            indicator.style.display = 'none';
-          }
-
-          // If we've loaded all messages, remove the indicator completely
-          if (!chatLoader.hasMoreMessages) {
-            const loadMoreContainer = document.getElementById('load-more-container');
-            if (loadMoreContainer) {
-              loadMoreContainer.remove();
+        // Add scroll event to automatically load older messages
+        if (messageHistory) {
+          messageHistory.addEventListener('scroll', function() {
+            // Check if user has scrolled near the top
+            if (messageHistory.scrollTop < progressiveChatLoader.loadThreshold) {
+              progressiveChatLoader.loadOlderMessages();
             }
+          });
+
+          // Check if we have a scroll indicator element
+          const scrollIndicator = document.getElementById('scroll-indicator');
+          if (scrollIndicator) {
+            scrollIndicator.addEventListener('click', function() {
+              progressiveChatLoader.loadOlderMessages();
+            });
           }
-        };
+        }
       }
     }
   });
