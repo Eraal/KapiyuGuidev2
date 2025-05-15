@@ -9,6 +9,21 @@
  */
 
 class InquiryChat {
+    /**
+     * Create an InquiryChat instance
+     * @param {Object} config - Configuration object
+     * @param {Object} config.socket - The Socket.IO socket instance
+     * @param {HTMLElement} config.messageInput - The message input element
+     * @param {HTMLElement} config.sendButton - The send button element
+     * @param {HTMLElement} config.messageContainer - The message container element
+     * @param {HTMLElement} config.typingIndicator - The typing indicator element
+     * @param {string|number} config.inquiryId - The ID of the inquiry
+     * @param {string|number} config.currentUserId - The current user's ID
+     * @param {string} config.currentUserRole - The current user's role
+     * @param {string} config.currentUserName - The current user's full name
+     * @param {string} config.currentUserInitials - The current user's initials
+     * @param {string|number} [config.studentId] - The student's ID (only needed for office admin)
+     */
     constructor(config) {
         // Store configuration
         this.socket = config.socket;
@@ -27,27 +42,20 @@ class InquiryChat {
         this.isTyping = false;
         this.typingTimeout = null;
         this.unreadMessages = [];
-        this.debugMode = true; // Enable debugging for troubleshooting
-        this.eventNamespace = 'inquiry_chat'; // Use specific namespace to avoid conflicts with counseling
-        this.hasJoinedRooms = false; // Track if we've joined the rooms
-
-        // Track event listeners for cleanup
-        this._boundEventListeners = [];
+        this.notificationSound = document.getElementById('notificationSound');
+        this.debugMode = true; // Enable debugging
+        this.joinedRooms = []; // Track joined rooms for proper cleanup
 
         // Initialize the chat
         this.init();
-        this.debug('InquiryChat constructor completed');
     }
 
     /**
      * Initialize the chat functionality
      */
     init() {
-        // NOTE: We're no longer activating the general chat feature in window.socketManager
-        // because that creates conflicts with the dedicated socket for inquiry chat
-
-        // Join the room for this inquiry using our dedicated socket
-        this.joinInquiryRooms();
+        // Join all required rooms for this inquiry using consistent naming
+        this._joinInquiryRooms();
 
         // Set up event listeners
         this.setupSocketListeners();
@@ -60,51 +68,36 @@ class InquiryChat {
     }
 
     /**
-     * Join all needed inquiry rooms and track the membership
+     * Join all required rooms for this inquiry
+     * @private
      */
-    joinInquiryRooms() {
-        if (!this.socket) {
-            this.debug('Cannot join rooms - no socket available');
-            return;
-        }
+    _joinInquiryRooms() {
+        // Define the rooms to join
+        const inquiryRoom = `inquiry_${this.inquiryId}`;
+        const viewRoom = `inquiry_view_${this.inquiryId}`;
 
-        const room = `inquiry_${this.inquiryId}`;
-
-        // Join inquiry-specific room
+        // Join the main inquiry room
         this.socket.emit('join_inquiry_room', {
             inquiry_id: this.inquiryId
         });
-        this.debug(`Joined inquiry_room: ${room}`);
+        this.joinedRooms.push('join_inquiry_room');
+        this.debug(`Joined room via join_inquiry_room event with inquiry_id=${this.inquiryId}`);
 
-        // Also join the standard socket.io room format
+        // Join the standard room for this inquiry
         this.socket.emit('join', {
-            room: room,
-            context: 'inquiry_chat' // Mark this as inquiry chat context to differentiate
-        });
-        this.debug(`Joined standard room: ${room}`);
-
-        // Join the view room as well
-        this.socket.emit('join', {
-            room: `inquiry_view_${this.inquiryId}`,
+            room: inquiryRoom,
             context: 'inquiry_chat'
         });
-        this.debug(`Joined view room: inquiry_view_${this.inquiryId}`);
+        this.joinedRooms.push(inquiryRoom);
+        this.debug(`Joined room: ${inquiryRoom}`);
 
-        this.hasJoinedRooms = true;
-    }
-
-    /**
-     * Verify and rejoin rooms if necessary
-     */
-    verifyRoomMembership() {
-        if (!this.hasJoinedRooms) {
-            this.debug('Rooms not joined previously, joining now');
-            this.joinInquiryRooms();
-            return;
-        }
-
-        // Rejoin rooms to ensure we're still in them
-        this.joinInquiryRooms();
+        // Join the view room for this inquiry (for admins viewing specific inquiries)
+        this.socket.emit('join', {
+            room: viewRoom,
+            context: 'inquiry_chat'
+        });
+        this.joinedRooms.push(viewRoom);
+        this.debug(`Joined room: ${viewRoom}`);
     }
 
     /**
@@ -112,7 +105,7 @@ class InquiryChat {
      */
     debug(...args) {
         if (this.debugMode) {
-            console.log(`[InquiryChat] [${this.inquiryId}]`, ...args);
+            console.log(`[InquiryChat]`, ...args);
         }
     }
 
@@ -120,42 +113,15 @@ class InquiryChat {
      * Set up Socket.IO event listeners
      */
     setupSocketListeners() {
-        // Use document events from our feature-based architecture with our specific namespace
-        this.debug('Setting up socket listeners for inquiry chat');
+        // Listen for new messages - handle all possible event types
+        const messageEventHandler = (data) => {
+            this.debug('Received message event:', data);
 
-        // Handle new messages
-        const messageHandler = (event) => {
-            const data = event.detail;
-
-            // Skip messages for other inquiries
-            if (!data || data.inquiry_id != this.inquiryId) {
+            // Only handle messages for this inquiry
+            if (data.inquiry_id != this.inquiryId) {
                 this.debug('Message is for another inquiry, ignoring');
                 return;
             }
-
-            // Use the namespaced event handler to prevent duplicate processing
-            // Only continue if this is not a duplicate message
-            if (!window.socketManager || !window.socketManager.handleNamespacedEvent) {
-                // Fallback if handleNamespacedEvent not available
-                this._processNewMessage(data);
-                return;
-            }
-
-            // Create unique ID from message properties with our specific namespace
-            const messageId = data.message_id || data.id;
-            const eventId = `inquiry_msg_${messageId}_${data.inquiry_id}`;
-
-            window.socketManager.handleNamespacedEvent(this.eventNamespace, eventId, () => {
-                this._processNewMessage(data);
-            });
-        };
-
-        /**
-         * Process a new chat message after duplicate check
-         * @private
-         */
-        this._processNewMessage = (data) => {
-            this.debug('Processing new message event:', data);
 
             // If the message is from someone else
             if (data.sender_id != this.currentUserId) {
@@ -166,8 +132,7 @@ class InquiryChat {
                 this.socket.emit('chat_message_delivered', {
                     inquiry_id: this.inquiryId,
                     message_id: data.message_id || data.id,
-                    sender_id: data.sender_id,
-                    timestamp: new Date().toISOString()
+                    sender_id: data.sender_id
                 });
                 this.debug('Marked message as delivered');
 
@@ -191,15 +156,41 @@ class InquiryChat {
             }
         };
 
-        // Handle message status updates
-        const statusHandler = (event) => {
-            const data = event.detail;
+        // Listen for all message event types
+        this.socket.on('new_chat_message', messageEventHandler);
+        this.socket.on('new_message', messageEventHandler);
+        this.socket.on('student_message_sent', messageEventHandler);
 
-            if (!data || data.inquiry_id != this.inquiryId) {
-                return;
+        // Listen for typing indicators - handle both student and admin typing events
+        const typingEventHandler = (data) => {
+            this.debug('Received typing indicator:', data);
+
+            // Only handle typing indicators for this inquiry
+            if (data.inquiry_id != this.inquiryId) return;
+
+            // Skip if this is our own typing event
+            if (this.currentUserRole === 'office_admin' && data.office_admin_id == this.currentUserId) return;
+            if (this.currentUserRole === 'student' && data.student_id == this.currentUserId) return;
+
+            if (data.is_typing) {
+                const userName = data.admin_name || data.user_name || 'User';
+                this.showTypingIndicator(userName);
+            } else {
+                this.hideTypingIndicator();
             }
+        };
 
+        // Listen for both admin and student typing indicators
+        this.socket.on('user_typing', typingEventHandler);
+        this.socket.on('student_typing', typingEventHandler);
+        this.socket.on('admin_typing', typingEventHandler);
+
+        // Listen for message status updates
+        this.socket.on('message_status_update', (data) => {
             this.debug('Received message status update:', data);
+
+            // Only handle updates for this inquiry
+            if (data.inquiry_id != this.inquiryId) return;
 
             // Update the message status in the UI
             const messageElement = document.querySelector(`[data-message-id="${data.message_id}"]`);
@@ -224,70 +215,49 @@ class InquiryChat {
                     if (textElement) {
                         textElement.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
                     }
+
                     this.debug('Updated message status in UI');
                 }
             }
-        };
+        });
+    }
 
-        // Handle typing indicators
-        const typingHandler = (event) => {
-            const data = event.detail;
+    /**
+     * Set up UI event listeners
+     */
+    setupUIListeners() {
+        // Listen for message input to detect typing
+        this.messageInput.addEventListener('input', () => {
+            this.handleTypingEvent();
+        });
 
-            if (!data || data.inquiry_id != this.inquiryId) {
-                return;
+        // Listen for focus/blur events to mark messages as read
+        window.addEventListener('focus', () => {
+            this.markVisibleMessagesAsRead();
+        });
+
+        // Listen for scroll events to mark messages as read when they become visible
+        this.messageContainer.addEventListener('scroll', () => {
+            this.markVisibleMessagesAsRead();
+        });
+
+        // Listen for message form submissions
+        const messageForm = this.messageInput.closest('form');
+        if (messageForm) {
+            messageForm.addEventListener('submit', (e) => {
+                // We'll let the form submit normally and handle the real-time updates
+                // after the message is saved to the database
+
+                // Stop typing indicator
+                this.stopTypingIndicator();
+            });
+        }
+
+        // Listen for visibility change to mark messages as read when page becomes visible
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                this.markVisibleMessagesAsRead();
             }
-
-            this.debug('Received typing indicator:', data);
-
-            // Skip if this is our own typing event
-            if (this.currentUserRole === 'office_admin' && data.office_admin_id == this.currentUserId) return;
-            if (this.currentUserRole === 'student' && data.student_id == this.currentUserId) return;
-
-            if (data.is_typing) {
-                const userName = data.admin_name || data.user_name || 'User';
-                this.showTypingIndicator(userName);
-            } else {
-                this.hideTypingIndicator();
-            }
-        };
-
-        // Register listeners with document events for our specific namespace
-        document.addEventListener('chat:new_message', messageHandler);
-        document.addEventListener('chat:status_update', statusHandler);
-        document.addEventListener('chat:typing_indicator', typingHandler);
-
-        // Store references for cleanup
-        this._boundEventListeners = [
-            { element: document, event: 'chat:new_message', handler: messageHandler },
-            { element: document, event: 'chat:status_update', handler: statusHandler },
-            { element: document, event: 'chat:typing_indicator', handler: typingHandler }
-        ];
-
-        // Handle socket connection issues with direct listeners on our dedicated socket
-        this.socket.on('connect_error', (error) => {
-            this.debug('Socket connection error:', error);
-        });
-
-        this.socket.on('disconnect', (reason) => {
-            this.debug('Socket disconnected:', reason);
-            this.hasJoinedRooms = false; // Mark rooms as left
-        });
-
-        this.socket.on('reconnect', (attemptNumber) => {
-            this.debug('Socket reconnected after', attemptNumber, 'attempts');
-            // Rejoin the inquiry rooms after reconnect
-            this.joinInquiryRooms();
-        });
-
-        // Add a periodic verification of room membership
-        this._roomVerificationInterval = setInterval(() => {
-            this.verifyRoomMembership();
-        }, 60000); // Check every minute
-
-        // Register with health check system
-        document.addEventListener('socket:health_check', () => {
-            this.debug('Received health check, verifying room membership');
-            this.verifyRoomMembership();
         });
     }
 
@@ -295,74 +265,75 @@ class InquiryChat {
      * Handle typing events
      */
     handleTypingEvent() {
-        // Clear previous timeout
+        // If not already marked as typing, emit the typing event
+        if (!this.isTyping) {
+            this.isTyping = true;
+
+            // Emit appropriate typing event based on user role
+            if (this.currentUserRole === 'student') {
+                this.socket.emit('student_typing', {
+                    inquiry_id: this.inquiryId,
+                    student_id: this.currentUserId,
+                    is_typing: true
+                });
+                this.debug('Emitted student typing event (typing)');
+            } else if (this.currentUserRole === 'office_admin') {
+                // For office admins, we need to specify both the inquiry and the student
+                this.socket.emit('typing_indicator', {
+                    inquiry_id: this.inquiryId,
+                    student_id: this.studentId,
+                    office_admin_id: this.currentUserId,
+                    admin_name: this.currentUserName,
+                    is_typing: true
+                });
+                this.debug('Emitted admin typing event (typing)');
+            }
+        }
+
+        // Clear any existing timeout
         if (this.typingTimeout) {
             clearTimeout(this.typingTimeout);
         }
 
-        const content = this.messageInput.value.trim();
-
-        // If there's content and we're not already marked as typing
-        if (content && !this.isTyping) {
-            this.isTyping = true;
-            this.emitTypingStatus(true);
-            this.debug('Started typing');
-        }
-        // If no content and we're currently marked as typing
-        else if (!content && this.isTyping) {
-            this.isTyping = false;
-            this.emitTypingStatus(false);
-            this.debug('Stopped typing (no content)');
-        }
-
-        // Set a timeout to automatically stop typing indicator
+        // Set a new timeout to stop the typing indicator after 2 seconds of inactivity
         this.typingTimeout = setTimeout(() => {
-            if (this.isTyping) {
-                this.isTyping = false;
-                this.emitTypingStatus(false);
-                this.debug('Stopped typing (timeout)');
-            }
-        }, 5000); // 5 seconds without typing = stop typing indicator
-    }
-
-    /**
-     * Emit typing status to other users
-     * @param {boolean} isTyping - Whether the user is typing
-     */
-    emitTypingStatus(isTyping) {
-        // Different events based on user role
-        if (this.currentUserRole === 'student') {
-            this.socket.emit('student_typing', {
-                inquiry_id: this.inquiryId,
-                student_id: this.currentUserId,
-                is_typing: isTyping
-            });
-            this.debug(`Emitted student_typing: ${isTyping}`);
-        } else {
-            this.socket.emit('admin_typing', {
-                inquiry_id: this.inquiryId,
-                student_id: this.studentId,
-                office_admin_id: this.currentUserId,
-                is_typing: isTyping
-            });
-            this.debug(`Emitted admin_typing: ${isTyping}`);
-        }
+            this.stopTypingIndicator();
+        }, 2000);
     }
 
     /**
      * Stop the typing indicator
      */
     stopTypingIndicator() {
-        if (this.typingTimeout) {
-            clearTimeout(this.typingTimeout);
-        }
-
         if (this.isTyping) {
             this.isTyping = false;
-            this.emitTypingStatus(false);
+
+            // Emit appropriate typing event based on user role
+            if (this.currentUserRole === 'student') {
+                this.socket.emit('student_typing', {
+                    inquiry_id: this.inquiryId,
+                    student_id: this.currentUserId,
+                    is_typing: false
+                });
+                this.debug('Emitted student typing event (stopped)');
+            } else if (this.currentUserRole === 'office_admin') {
+                // For office admins, we need to specify both the inquiry and the student
+                this.socket.emit('typing_indicator', {
+                    inquiry_id: this.inquiryId,
+                    student_id: this.studentId,
+                    office_admin_id: this.currentUserId,
+                    admin_name: this.currentUserName,
+                    is_typing: false
+                });
+                this.debug('Emitted admin typing event (stopped)');
+            }
         }
 
-        this.hideTypingIndicator();
+        // Clear the timeout
+        if (this.typingTimeout) {
+            clearTimeout(this.typingTimeout);
+            this.typingTimeout = null;
+        }
     }
 
     /**
@@ -372,9 +343,19 @@ class InquiryChat {
     showTypingIndicator(userName) {
         if (!this.typingIndicator) return;
 
-        this.debug(`Showing typing indicator for: ${userName}`);
-        this.typingIndicator.textContent = `${userName} is typing...`;
+        this.typingIndicator.innerHTML = `
+            <div class="flex items-center text-sm text-gray-500 p-2 mb-2">
+                <div class="flex space-x-1 mr-2">
+                    <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
+                    <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+                    <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
+                </div>
+                <span>${userName} is typing...</span>
+            </div>
+        `;
+
         this.typingIndicator.classList.remove('hidden');
+        this.debug(`Showing typing indicator for ${userName}`);
     }
 
     /**
@@ -382,34 +363,8 @@ class InquiryChat {
      */
     hideTypingIndicator() {
         if (!this.typingIndicator) return;
-
-        this.debug('Hiding typing indicator');
         this.typingIndicator.classList.add('hidden');
-        this.typingIndicator.textContent = '';
-    }
-
-    /**
-     * Play notification sound using the centralized NotificationSoundManager
-     */
-    playNotificationSound() {
-        // Use the global sound manager if available
-        if (window.soundManager) {
-            this.debug('Playing notification sound via sound manager');
-            window.soundManager.playSound('default')
-                .catch(error => this.debug('Error playing notification sound:', error));
-        } else {
-            this.debug('Sound manager not available');
-        }
-    }
-
-    /**
-     * Scroll the message container to the bottom
-     */
-    scrollToBottom() {
-        if (this.messageContainer) {
-            this.messageContainer.scrollTop = this.messageContainer.scrollHeight;
-            this.debug('Scrolled message container to bottom');
-        }
+        this.debug('Hiding typing indicator');
     }
 
     /**
@@ -439,32 +394,39 @@ class InquiryChat {
         let senderInitials = 'UN';
         if (isSentByMe) {
             senderInitials = this.currentUserInitials;
-        } else {
-            if (message.sender_name) {
-                senderInitials = message.sender_name.split(' ').map(n => n[0]).join('').toUpperCase();
+        } else if (message.sender_name) {
+            const nameParts = message.sender_name.split(' ');
+            if (nameParts.length > 1) {
+                senderInitials = nameParts[0].charAt(0) + nameParts[nameParts.length - 1].charAt(0);
+            } else {
+                senderInitials = message.sender_name.substring(0, 2);
             }
         }
 
-        // Create message HTML
+        // Create message HTML - ensures consistency between student and office modules
         messageElement.innerHTML = `
-            <div class="message-bubble ${isSentByMe ? 'message-sent bg-blue-100' : 'message-received bg-gray-100'} p-4 rounded-lg shadow-sm max-w-xs md:max-w-md lg:max-w-lg" data-message-id="${messageId}" data-sender-id="${message.sender_id}">
-                <div class="flex items-center mb-1">
-                    ${!isSentByMe ? `
-                    <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white mr-2">
-                        ${senderInitials}
-                    </div>
-                    <div>
-                        <div class="font-semibold">${message.sender_name || 'User'}</div>
-                        <div class="text-xs text-gray-500">${formattedDate}</div>
-                    </div>
+            <div class="message-bubble p-4 ${isSentByMe ? 'message-sent' : 'message-received'}"
+                 data-message-id="${messageId}" data-sender-id="${message.sender_id}">
+                <div class="flex items-center mb-2">
+                    ${isSentByMe ? `
+                        <div class="text-right ml-auto">
+                            <div class="text-xs font-semibold">You</div>
+                            <div class="text-xs text-gray-500">${formattedDate}</div>
+                        </div>
+                        <div class="h-8 w-8 rounded-full bg-green-500 ml-2 flex items-center justify-center text-white">
+                            ${this.currentUserInitials}
+                        </div>
                     ` : `
-                    <div>
-                        <div class="text-right font-semibold">You</div>
-                        <div class="text-xs text-gray-500 text-right">${formattedDate}</div>
-                    </div>
-                    <div class="h-8 w-8 rounded-full bg-green-500 flex items-center justify-center text-white ml-2">
-                        ${senderInitials}
-                    </div>
+                        <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white">
+                            ${senderInitials}
+                        </div>
+                        <div class="ml-2">
+                            <div class="text-xs font-semibold">
+                                ${message.sender_name || 'User'} 
+                                ${(message.is_student || message.sender_role === 'student') ? '<span class="text-blue-600">(Student)</span>' : ''}
+                            </div>
+                            <div class="text-xs text-gray-500">${formattedDate}</div>
+                        </div>
                     `}
                 </div>
                 <div class="text-sm">${(message.content || '').replace(/\n/g, '<br>')}</div>
@@ -487,15 +449,25 @@ class InquiryChat {
 
         // Scroll to the bottom
         this.scrollToBottom();
+    }
 
-        // Send message_received event to confirm message display
-        if (!isSentByMe) {
-            this.socket.emit('message_received', {
-                inquiry_id: this.inquiryId,
-                message_id: messageId,
-                sender_id: message.sender_id
+    /**
+     * Scroll the message container to the bottom
+     */
+    scrollToBottom() {
+        if (!this.messageContainer) return;
+        this.messageContainer.scrollTop = this.messageContainer.scrollHeight;
+    }
+
+    /**
+     * Play the notification sound
+     */
+    playNotificationSound() {
+        if (this.notificationSound && this.notificationSound.play) {
+            this.notificationSound.play().catch(error => {
+                // Autoplay might be blocked, we can ignore this error
+                console.log('Could not play notification sound:', error);
             });
-            this.debug(`Sent message_received confirmation for message ${messageId}`);
         }
     }
 
@@ -529,7 +501,6 @@ class InquiryChat {
                     message_id: messageId,
                     sender_id: senderId
                 });
-
                 this.debug(`Marked message ${messageId} as read`);
 
                 // Remove from unread messages
@@ -542,33 +513,38 @@ class InquiryChat {
      * Clean up event listeners and disconnect
      */
     destroy() {
-        // Leave the inquiry room
-        if (this.socket) {
-            this.socket.emit('leave', { room: `inquiry_${this.inquiryId}` });
-            this.socket.emit('leave', { room: `inquiry_view_${this.inquiryId}` });
-        }
-
-        // Clear any timeouts and intervals
-        if (this.typingTimeout) {
-            clearTimeout(this.typingTimeout);
-        }
-
-        if (this._roomVerificationInterval) {
-            clearInterval(this._roomVerificationInterval);
-        }
-
-        // Remove all event listeners
-        this._boundEventListeners.forEach(({ element, event, handler }) => {
-            element.removeEventListener(event, handler);
+        // Leave all joined rooms
+        this.joinedRooms.forEach(room => {
+            if (room === 'join_inquiry_room') {
+                // Special handling for join_inquiry_room
+                this.socket.emit('leave_inquiry_room', {
+                    inquiry_id: this.inquiryId
+                });
+                this.debug(`Left room via leave_inquiry_room event with inquiry_id=${this.inquiryId}`);
+            } else {
+                // Standard room leaving
+                this.socket.emit('leave', {
+                    room: room,
+                    context: 'inquiry_chat'
+                });
+                this.debug(`Left room: ${room}`);
+            }
         });
 
-        // Clear references
-        this._boundEventListeners = [];
-        this.hasJoinedRooms = false;
+        // Clear the joined rooms array
+        this.joinedRooms = [];
+
+        // Stop typing indicator if active
+        if (this.isTyping) {
+            this.stopTypingIndicator();
+        }
+
+        // Clean up any timeouts
+        if (this.typingTimeout) {
+            clearTimeout(this.typingTimeout);
+            this.typingTimeout = null;
+        }
 
         this.debug(`InquiryChat destroyed for inquiry ${this.inquiryId}`);
-
-        // We no longer need to deactivate any global features
-        // since we're using a dedicated socket connection
     }
 }

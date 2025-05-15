@@ -3,6 +3,9 @@ Session - {{ session.id }}{% endblock %} {% block head_extra %}
 <!-- WebRTC and necessary libraries -->
 <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<!-- Include counseling socket files -->
+<script src="{{ url_for('static', filename='js/counseling-base.js') }}"></script>
+<script src="{{ url_for('static', filename='js/counseling-sockets.js') }}"></script>
 <link
   rel="stylesheet"
   href="{{ url_for('static', filename='css/video-call.css') }}"
@@ -547,50 +550,63 @@ Session - {{ session.id }}{% endblock %} {% block head_extra %}
 
   // Initialize Socket.IO connection
   function initSocketConnection() {
-    // Use the shared ConnectionManager instance instead of creating a new connection
-    if (window.connectionManager) {
-      window.connectionManager.getConnection()
-        .then(sharedSocket => {
-          // Use the shared socket
-          socket = sharedSocket;
-          console.log('Using shared socket connection for video session');
+    // Always create a dedicated connection for video counseling to avoid conflicts with chat
+    console.log('Creating dedicated connection for video counseling');
 
-          // Handle socket connection events
-          if (socket.connected) {
-            console.log('Already connected to signaling server');
-            connectionStatus.textContent = 'Signaling Connected';
+    if (window.DedicatedConnectionManager) {
+      // Use our dedicated connection manager
+      window.DedicatedConnectionManager.createConnection({
+        feature: 'video_counseling',
+        query: {
+          session_id: sessionId,
+          role: 'office_admin',
+          user_id: currentUserId
+        },
+        debug: true
+      })
+      .then(dedicatedSocket => {
+        // Use the dedicated socket
+        socket = dedicatedSocket;
+        console.log('Using dedicated socket connection for video session');
 
-            // Join the video call room
-            socket.emit('join_call', {
-              session_id: sessionId
-            });
+        if (socket.connected) {
+          console.log('Already connected to signaling server');
+          connectionStatus.textContent = 'Signaling Connected';
 
-            // Check waiting room status immediately
-            socket.emit('check_waiting_room_status', {
-              session_id: sessionId
-            });
-          }
+          // Join the video call room
+          socket.emit('join_call', {
+            session_id: sessionId
+          });
 
-          // Setup all socket event listeners for video session
-          setupVideoSessionEventListeners();
-        })
-        .catch(error => {
-          console.error('Failed to get shared socket connection:', error);
-          fallbackToDirectConnection();
-        });
+          // Check waiting room status immediately
+          socket.emit('check_waiting_room_status', {
+            session_id: sessionId
+          });
+        }
+
+        // Setup all socket event listeners for video session
+        setupVideoSessionEventListeners();
+      })
+      .catch(error => {
+        console.error('Failed to create dedicated connection:', error);
+        fallbackToDirectConnection();
+      });
     } else {
-      console.warn('ConnectionManager not available, using direct connection');
+      console.warn('DedicatedConnectionManager not available, using direct connection');
       fallbackToDirectConnection();
     }
   }
 
-  // Fallback to direct connection if shared connection is not available
+  // Fallback to direct connection if dedicated connection fails
   function fallbackToDirectConnection() {
-    console.log('Creating direct socket.io connection');
-    // Connect directly to socket.io server as before
-    socket = io.connect(window.location.origin, {
+    console.log('Creating direct socket.io connection for video session');
+    socket = io({
+      forceNew: true, // Force a new connection to avoid sharing with other features
       query: {
-        session_id: sessionId
+        feature: 'video_counseling',
+        session_id: sessionId,
+        role: 'office_admin',
+        user_id: currentUserId
       }
     });
 

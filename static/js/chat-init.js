@@ -10,77 +10,56 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatContainer = document.querySelector('[data-chat-container]');
     if (!chatContainer) return;
 
-    // Initialize Socket.IO connection using shared connection manager
+    // Get required data attributes early
+    const inquiryId = chatContainer.getAttribute('data-inquiry-id');
+    const currentUserId = chatContainer.getAttribute('data-user-id');
+    const currentUserRole = chatContainer.getAttribute('data-user-role');
+
+    if (!inquiryId || !currentUserId) {
+        console.error('Missing required data attributes for chat initialization');
+        return;
+    }
+
+    // Always create a dedicated connection for chat to avoid conflicts with counseling
+    console.log('Creating dedicated connection for inquiry chat');
+
+    // Use the DedicatedConnectionManager if available, otherwise fall back to direct connection
     let socketPromise;
-    if (window.connectionManager) {
-        console.log('Using shared connection manager for chat');
-        socketPromise = window.connectionManager.getConnection();
 
-        // Make sure the socketManager exists or create it
-        if (!window.socketManager) {
-            console.log('Creating socketManager for chat');
-            window.socketManager = new BaseSocketManager();
-
-            // Start health check system
-            if (window.socketManager.startHealthChecks) {
-                window.socketManager.startHealthChecks();
-                console.log('Health check system started');
-            }
-
-            // Activate chat feature specifically
-            window.socketManager.activateFeature('chat');
-            console.log('Activated chat feature');
-        } else {
-            console.log('Using existing socketManager');
-            // Ensure chat feature is activated
-            window.socketManager.activateFeature('chat');
-
-            // Make sure we're in the right rooms for this inquiry
-            setTimeout(() => {
-                const inquiryId = chatContainer.getAttribute('data-inquiry-id');
-                if (inquiryId && window.socketManager.rejoinRooms) {
-                    window.socketManager.rejoinRooms();
-                    console.log('Rejoined socket rooms for inquiry chat');
-                }
-            }, 500); // Small delay to allow for connection setup
-        }
+    if (window.DedicatedConnectionManager) {
+        // Create a dedicated connection for this chat instance
+        socketPromise = window.DedicatedConnectionManager.createConnection({
+            feature: 'inquiry_chat',
+            query: {
+                inquiry_id: inquiryId,
+                user_id: currentUserId,
+                role: currentUserRole
+            },
+            debug: true
+        });
     } else {
-        console.log('Connection manager not found, falling back to direct connection');
-        // Get the socket.io URL from meta tag or use default
-        const socketUrl = document.querySelector('meta[name="socket-io-url"]')?.content || '';
-
-        // Create a new socket connection
-        window.socket = io(socketUrl);
+        console.warn('DedicatedConnectionManager not found, falling back to direct connection');
+        // Create a new socket connection with forceNew to ensure separation
+        const socket = io({
+            forceNew: true,
+            query: {
+                feature: 'inquiry_chat',
+                inquiry_id: inquiryId,
+                user_id: currentUserId,
+                role: currentUserRole
+            }
+        });
 
         // Wrap in a promise for consistent API
-        socketPromise = Promise.resolve(window.socket);
-
-        // Set up global socket event listeners
-        window.socket.on('connect', () => {
-            console.log('Socket.io connected');
-        });
-
-        window.socket.on('disconnect', () => {
-            console.log('Socket.io disconnected');
-        });
-
-        window.socket.on('error', (error) => {
-            console.error('Socket.io error:', error);
-        });
-
-        // Log explicit warning about missing connection manager
-        console.warn('WARNING: Using direct socket connection without connection manager. This may cause issues with room management and event handling!');
+        socketPromise = Promise.resolve(socket);
     }
 
     // Once we have a socket connection, initialize the chat
     socketPromise.then(socket => {
-        // Get required elements and data attributes
-        const inquiryId = chatContainer.getAttribute('data-inquiry-id');
-        const currentUserId = chatContainer.getAttribute('data-user-id');
-        const currentUserRole = chatContainer.getAttribute('data-user-role');
+        // Get additional required elements and data attributes
         const currentUserName = chatContainer.getAttribute('data-user-name');
         const currentUserInitials = getUserInitials(currentUserName);
-        const studentId = chatContainer.getAttribute('data-student-id'); // Make sure we get student ID
+        const studentId = chatContainer.getAttribute('data-student-id');
 
         const messageInput = document.querySelector('[data-message-input]');
         const sendButton = document.querySelector('[data-send-button]');
@@ -88,17 +67,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const typingIndicator = document.querySelector('[data-typing-indicator]');
 
         // Validate required elements and data
-        if (!inquiryId || !currentUserId || !messageInput || !messageContainer) {
-            console.error('Missing required elements or data for chat initialization');
+        if (!messageInput || !messageContainer) {
+            console.error('Missing required elements for chat initialization');
             return;
         }
 
         console.log(`Initializing chat for inquiry ${inquiryId} with user ${currentUserId} (${currentUserRole})`);
 
-        // Join inquiry room explicitly before initializing chat
-        socket.emit('join_inquiry_room', { inquiry_id: inquiryId });
-        socket.emit('join', { room: `inquiry_${inquiryId}` });
-        console.log(`Explicitly joined inquiry rooms for inquiry ${inquiryId}`);
+        // Join rooms via a single unified method instead of multiple calls
+        // All room joining will be handled by the InquiryChat class itself
+        // to avoid duplicate event handling
 
         // Initialize the InquiryChat instance
         window.chatInstance = new InquiryChat({
@@ -120,10 +98,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.chatInstance) {
                 window.chatInstance.destroy();
             }
-
-            // Explicitly leave the inquiry room to avoid lingering subscriptions
-            socket.emit('leave', { room: `inquiry_${inquiryId}` });
-            console.log(`Left inquiry room: inquiry_${inquiryId}`);
         });
     }).catch(error => {
         console.error('Failed to initialize chat:', error);

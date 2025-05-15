@@ -3,6 +3,9 @@ KapiyuGuide{% endblock %} {% block head_extra %}
 <!-- WebRTC and necessary libraries -->
 <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<!-- Include counseling socket files -->
+<script src="{{ url_for('static', filename='js/counseling-base.js') }}"></script>
+<script src="{{ url_for('static', filename='js/counseling-sockets.js') }}"></script>
 <link
   rel="stylesheet"
   href="{{ url_for('static', filename='css/video-call.css') }}"
@@ -492,125 +495,184 @@ KapiyuGuide{% endblock %} {% block head_extra %}
 
   // Initialize Socket.IO connection
   function initSocketConnection() {
-      // Connect to socket.io server
-      socket = io.connect(window.location.origin, {
-          query: {
-              session_id: sessionId
-          }
-      });
+    // Always create a dedicated connection for video counseling to avoid conflicts with chat
+    console.log('Creating dedicated connection for video counseling');
 
-      // Socket connection events
-      socket.on('connect', () => {
-          console.log('Connected to signaling server');
+    if (window.DedicatedConnectionManager) {
+      // Use our dedicated connection manager
+      window.DedicatedConnectionManager.createConnection({
+        feature: 'video_counseling',
+        query: {
+          session_id: sessionId,
+          role: 'student',
+          user_id: currentUserId
+        },
+        debug: true
+      })
+      .then(dedicatedSocket => {
+        // Use the dedicated socket
+        socket = dedicatedSocket;
+        console.log('Using dedicated socket connection for video session');
+
+        if (socket.connected) {
+          console.log('Already connected to signaling server');
           connectionStatus.textContent = 'Signaling Connected';
 
           // Join the video call room
           socket.emit('join_call', {
-              session_id: sessionId
+            session_id: sessionId
           });
 
           // Check waiting room status immediately
           socket.emit('check_waiting_room_status', {
-              session_id: sessionId
+            session_id: sessionId
           });
+        }
+
+        // Setup all socket event listeners for video session
+        setupVideoSessionEventListeners();
+      })
+      .catch(error => {
+        console.error('Failed to create dedicated connection:', error);
+        fallbackToDirectConnection();
+      });
+    } else {
+      console.warn('DedicatedConnectionManager not available, using direct connection');
+      fallbackToDirectConnection();
+    }
+  }
+
+  // Fallback to direct connection if dedicated connection fails
+  function fallbackToDirectConnection() {
+    console.log('Creating direct socket.io connection for video session');
+    socket = io({
+      forceNew: true, // Force a new connection to avoid sharing with other features
+      query: {
+        feature: 'video_counseling',
+        session_id: sessionId,
+        role: 'student',
+        user_id: currentUserId
+      }
+    });
+
+    // Setup all socket event listeners for video session
+    setupVideoSessionEventListeners();
+  }
+
+  // Setup all event listeners for video session
+  function setupVideoSessionEventListeners() {
+    // Socket connection events
+    socket.on('connect', () => {
+      console.log('Connected to signaling server');
+      connectionStatus.textContent = 'Signaling Connected';
+
+      // Join the video call room
+      socket.emit('join_call', {
+        session_id: sessionId
       });
 
-      socket.on('connect_error', (error) => {
-          console.error('Socket connection error:', error);
-          connectionStatus.textContent = 'Signaling Error';
-          connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
-          connectionIndicator.classList.add('bg-red-500');
+      // Check waiting room status immediately
+      socket.emit('check_waiting_room_status', {
+        session_id: sessionId
       });
+    });
 
-      // Handle waiting room status updates
-      socket.on('waiting_room_status', (data) => {
-          console.log('Waiting room status update:', data);
-          waitingRoomStatus = data.status;
-          updateWaitingRoomUI(data);
+    socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+      connectionStatus.textContent = 'Signaling Error';
+      connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
+      connectionIndicator.classList.add('bg-red-500');
+    });
 
-          // If call is now in progress, start the call
-          if (data.call_started) {
-              startCall();
-          }
-      });
+    // Handle waiting room status updates
+    socket.on('waiting_room_status', (data) => {
+      console.log('Waiting room status update:', data);
+      waitingRoomStatus = data.status;
+      updateWaitingRoomUI(data);
 
-      // Handle start call event
-      socket.on('start_call', (data) => {
-          console.log('Starting call:', data);
-          waitingRoomStatus = 'call_in_progress';
-          startCall();
-      });
+      // If call is now in progress, start the call
+      if (data.call_started) {
+        startCall();
+      }
+    });
 
-      // Handle user joining
-      socket.on('user_joined', (data) => {
-          console.log('User joined:', data);
+    // Handle start call event
+    socket.on('start_call', (data) => {
+      console.log('Starting call:', data);
+      waitingRoomStatus = 'call_in_progress';
+      startCall();
+    });
 
-          // If we got a waiting status with the join event, update UI
-          if (data.waiting_status) {
-              waitingRoomStatus = data.waiting_status;
-              updateWaitingRoomUI({
-                  counselor_waiting: data.role === 'office_admin' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'counselor_waiting',
-                  student_waiting: data.role === 'student' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'student_waiting'
-              });
-          }
-      });
+    // Handle user joining
+    socket.on('user_joined', (data) => {
+      console.log('User joined:', data);
 
-      socket.on('user_left', (data) => {
-          console.log('User left:', data);
+      // If we got a waiting status with the join event, update UI
+      if (data.waiting_status) {
+        waitingRoomStatus = data.waiting_status;
+        updateWaitingRoomUI({
+          counselor_waiting: data.role === 'office_admin' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'counselor_waiting',
+          student_waiting: data.role === 'student' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'student_waiting'
+        });
+      }
+    });
 
-          // If call is in progress, show notification
-          if (waitingRoomStatus === 'call_in_progress') {
-              // Show notification that the other participant has left
-              alert(`${data.name} has left the session`);
+    socket.on('user_left', (data) => {
+      console.log('User left:', data);
 
-              // Update UI to show disconnected state
-              connectionStatus.textContent = 'Counselor disconnected';
-              connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
-              connectionIndicator.classList.add('bg-red-500');
+      // If call is in progress, show notification
+      if (waitingRoomStatus === 'call_in_progress') {
+        // Show notification that the other participant has left
+        alert(`${data.name} has left the session`);
 
-              // Clear remote video stream
-              if (remoteStream) {
-                  remoteStream.getTracks().forEach(track => track.stop());
-              }
-              remoteVideo.srcObject = null;
-          } else {
-              // We're in waiting room, update status
-              socket.emit('check_waiting_room_status', {
-                  session_id: sessionId
-              });
-          }
-      });
+        // Update UI to show disconnected state
+        connectionStatus.textContent = 'Counselor disconnected';
+        connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
+        connectionIndicator.classList.add('bg-red-500');
 
-      // WebRTC signaling events
-      socket.on('video_offer', (data) => {
-          console.log('Received video offer from:', data.sender_name);
-          handleVideoOffer(data);
-      });
+        // Clear remote video stream
+        if (remoteStream) {
+          remoteStream.getTracks().forEach(track => track.stop());
+        }
+        remoteVideo.srcObject = null;
+      } else {
+        // We're in waiting room, update status
+        socket.emit('check_waiting_room_status', {
+          session_id: sessionId
+        });
+      }
+    });
 
-      socket.on('video_answer', (data) => {
-          console.log('Received video answer from:', data.sender_name);
-          handleVideoAnswer(data);
-      });
+    // WebRTC signaling events
+    socket.on('video_offer', (data) => {
+      console.log('Received video offer from:', data.sender_name);
+      handleVideoOffer(data);
+    });
 
-      socket.on('ice_candidate', (data) => {
-          console.log('Received ICE candidate');
-          handleIceCandidate(data);
-      });
+    socket.on('video_answer', (data) => {
+      console.log('Received video answer from:', data.sender_name);
+      handleVideoAnswer(data);
+    });
 
-      // Handle waiting room messages
-      socket.on('waiting_room_message', (data) => {
-          console.log('Waiting room message:', data);
-          // Display as notification or in waiting room UI
-          const notificationDiv = document.createElement('div');
-          notificationDiv.className = 'p-2 mb-2 bg-blue-50 text-blue-700 rounded-lg transition-opacity duration-300';
-          notificationDiv.textContent = `${data.sender_name}: ${data.message}`;
-          document.body.appendChild(notificationDiv);
+    socket.on('ice_candidate', (data) => {
+      console.log('Received ICE candidate');
+      handleIceCandidate(data);
+    });
 
-          setTimeout(() => {
-              notificationDiv.style.opacity = '0';
-              setTimeout(() => notificationDiv.remove(), 1000);
-          }, 5000);
-      });
+    // Handle waiting room messages
+    socket.on('waiting_room_message', (data) => {
+      console.log('Waiting room message:', data);
+      // Display as notification or in waiting room UI
+      const notificationDiv = document.createElement('div');
+      notificationDiv.className = 'p-2 mb-2 bg-blue-50 text-blue-700 rounded-lg transition-opacity duration-300';
+      notificationDiv.textContent = `${data.sender_name}: ${data.message}`;
+      document.body.appendChild(notificationDiv);
+
+      setTimeout(() => {
+        notificationDiv.style.opacity = '0';
+        setTimeout(() => notificationDiv.remove(), 1000);
+      }, 5000);
+    });
   }
 
   // Update waiting room UI based on status

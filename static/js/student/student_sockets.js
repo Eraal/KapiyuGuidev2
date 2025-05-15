@@ -5,17 +5,54 @@
 
 class StudentSocketManager {
     constructor() {
-        this.socket = io();
-        this.setupEventListeners();
+        // Use DedicatedConnectionManager if available, otherwise fall back to direct connection
+        if (window.DedicatedConnectionManager) {
+            console.log('Using DedicatedConnectionManager for student notifications');
+            window.DedicatedConnectionManager.createConnection({
+                feature: 'student_notifications',
+                query: {
+                    feature: 'student_notifications'
+                }
+            })
+                .then(socket => {
+                    this.socket = socket;
+                    this.setupEventListeners();
+                    console.log('Student notification socket connected via DedicatedConnectionManager');
+                })
+                .catch(error => {
+                    console.error('Failed to create dedicated connection for student notifications:', error);
+                    this.fallbackToDirectConnection();
+                });
+        } else {
+            console.warn('DedicatedConnectionManager not found, falling back to direct connection');
+            this.fallbackToDirectConnection();
+        }
+
         this.notificationSound = document.getElementById('notificationSound');
+    }
+
+    /**
+     * Fallback to direct connection if dedicated connection manager is not available
+     */
+    fallbackToDirectConnection() {
+        this.socket = io({
+            forceNew: true, // Force a new connection to avoid sharing with other features
+            query: {
+                feature: 'student_notifications'
+            }
+        });
+        this.setupEventListeners();
+        this.connect();
     }
 
     /**
      * Initialize connection and join appropriate rooms
      */
     connect() {
+        if (!this.socket) return;
+
         this.socket.on('connect', () => {
-            console.log('Connected to WebSocket server');
+            console.log('Connected to WebSocket server for student notifications');
 
             // Join the student room on connection
             this.socket.emit('join', { room: 'student_room' });
