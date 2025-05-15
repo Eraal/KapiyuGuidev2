@@ -243,6 +243,7 @@ class Notification(db.Model):
     source_office_id = db.Column(db.Integer, db.ForeignKey('offices.id', ondelete='SET NULL'), index=True)  # Office that triggered the notification
     inquiry_id = db.Column(db.Integer, db.ForeignKey('inquiries.id', ondelete='SET NULL'), index=True)  # Related inquiry, if any
     announcement_id = db.Column(db.Integer, db.ForeignKey('announcements.id', ondelete='SET NULL'), index=True)  # Related announcement, if any
+    link = db.Column(db.String(255))  # Direct link to related content
     
     # Relationships
     user = db.relationship('User', back_populates='notifications')
@@ -347,7 +348,7 @@ class CounselingSession(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id', ondelete='CASCADE'), nullable=False, index=True)
     office_id = db.Column(db.Integer, db.ForeignKey('offices.id', ondelete='CASCADE'), nullable=False, index=True)
-    counselor_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    counselor_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=True, index=True)
     scheduled_at = db.Column(db.DateTime, nullable=False, index=True)
     duration_minutes = db.Column(db.Integer, default=60)  # Default session duration
     status = db.Column(db.String(50), default='pending', index=True)
@@ -363,6 +364,11 @@ class CounselingSession(db.Model):
     counselor_joined_at = db.Column(db.DateTime)
     student_joined_at = db.Column(db.DateTime)
     session_ended_at = db.Column(db.DateTime)
+    
+    # Waiting room tracking
+    counselor_in_waiting_room = db.Column(db.Boolean, default=False)
+    student_in_waiting_room = db.Column(db.Boolean, default=False)
+    call_started_at = db.Column(db.DateTime)  # Changed from call_started Boolean to call_started_at DateTime
     
     student = db.relationship('Student', back_populates='counseling_sessions')
     office = db.relationship('Office', back_populates='counseling_sessions')
@@ -395,6 +401,22 @@ class CounselingSession(db.Model):
         end_time = start_time + datetime.timedelta(minutes=self.duration_minutes)
         return start_time <= now <= end_time and self.status == 'in_progress'
     
+    def get_waiting_room_status(self):
+        """
+        Get the current waiting room status
+        Returns one of: 'empty', 'counselor_waiting', 'student_waiting', 'both_waiting', 'call_in_progress'
+        """
+        if self.call_started_at:
+            return "call_in_progress"
+        elif self.counselor_in_waiting_room and self.student_in_waiting_room:
+            return "both_waiting"
+        elif self.counselor_in_waiting_room:
+            return "counselor_waiting"
+        elif self.student_in_waiting_room:
+            return "student_waiting"
+        else:
+            return "empty"
+
 # New model for session recording (optional feature)
 class SessionRecording(db.Model):
     __tablename__ = 'session_recordings'

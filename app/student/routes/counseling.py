@@ -137,7 +137,7 @@ def schedule_session():
             flash('The selected office does not support video counseling', 'error')
             return redirect(url_for('student.request_counseling_session'))
         
-        # Create new counseling session
+        # Create new counseling session without assigning a counselor - this will be done by office admin
         new_session = CounselingSession(
             student_id=student.id,
             office_id=office_id,
@@ -145,15 +145,17 @@ def schedule_session():
             status='pending',
             is_video_session=is_video,
             notes=notes,
-            counselor_id=None  # Will be assigned by office admin
+            # counselor_id will be assigned when an office admin confirms the session
         )
+        
         db.session.add(new_session)
         
         # Log this activity
         log_entry = StudentActivityLog(
             student_id=student.id,
             action="Scheduled new counseling session",
-            details=f"Office ID: {office_id}, Scheduled at: {scheduled_datetime}, Video: {is_video}",
+            related_id=new_session.id,
+            related_type="counseling_session",
             timestamp=datetime.utcnow(),
             ip_address=request.remote_addr,
             user_agent=request.user_agent.string
@@ -161,7 +163,7 @@ def schedule_session():
         db.session.add(log_entry)
         
         db.session.commit()
-        flash('Counseling session scheduled successfully', 'success')
+        flash('Counseling session requested successfully. An office administrator will review and confirm your request.', 'success')
         return redirect(url_for('student.view_session', session_id=new_session.id))
         
     except Exception as e:
@@ -251,3 +253,217 @@ def check_office_video_support(office_id):
         'supports_video': office.supports_video,
         'office_name': office.name
     })
+
+@student_bp.route('/cancel-session/<int:session_id>', methods=['POST'])
+@login_required
+@role_required(['student'])
+def cancel_session(session_id):
+    """Cancel a scheduled counseling session"""
+    # Get the student record
+    student = Student.query.filter_by(user_id=current_user.id).first_or_404()
+    
+    # Get the session and verify ownership
+    session = CounselingSession.query.filter_by(
+        id=session_id,
+        student_id=student.id
+    ).first_or_404()
+    
+    # Only allow cancellation if the session is pending or confirmed
+    if session.status not in ['pending', 'confirmed']:
+        flash('This session cannot be cancelled.', 'error')
+        return redirect(url_for('student.view_session', session_id=session_id))
+    
+    # Get the reason for cancellation
+    reason = request.form.get('reason', 'No reason provided')
+    
+    try:
+        # Update session status
+        session.status = 'cancelled'
+        
+        # Add cancellation reason to notes
+        if session.notes:
+            session.notes += f"\n\nCancellation reason: {reason}"
+        else:
+            session.notes = f"Cancellation reason: {reason}"
+        
+        # Log this activity
+        log_entry = StudentActivityLog(
+            student_id=student.id,
+            action=f"Cancelled counseling session #{session_id}",
+            related_id=session.id,
+            related_type="counseling_session",
+            timestamp=datetime.utcnow(),
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string
+        )
+        db.session.add(log_entry)
+        
+        db.session.commit()
+        flash('Counseling session cancelled successfully.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error cancelling session: {str(e)}', 'error')
+    
+    return redirect(url_for('student.counseling_sessions'))
+
+@student_bp.route('/request-recording/<int:session_id>', methods=['POST'])
+@login_required
+@role_required(['student'])
+def request_recording(session_id):
+    """Request a recording of a completed video counseling session"""
+    # Get the student record
+    student = Student.query.filter_by(user_id=current_user.id).first_or_404()
+    
+    # Get the session and verify ownership
+    session = CounselingSession.query.filter_by(
+        id=session_id,
+        student_id=student.id
+    ).first_or_404()
+    
+    # Only allow recording requests for completed video sessions
+    if not session.is_video_session or session.status != 'completed':
+        return jsonify({
+            'success': False,
+            'message': 'Recording can only be requested for completed video sessions.'
+        })
+    
+    try:
+        # Check if there's already a recording
+        from app.models import SessionRecording, Notification
+        recording = SessionRecording.query.filter_by(session_id=session_id).first()
+        
+        if recording:
+            # Recording exists, create a notification for the student
+            notification = Notification(
+                user_id=current_user.id,
+                title="Recording Available",
+                message=f"The recording for your counseling session on {session.scheduled_at.strftime('%Y-%m-%d')} is available.",
+                source_office_id=session.office_id,
+                inquiry_id=None,
+                announcement_id=None,
+                is_read=False
+            )
+            db.session.add(notification)
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Recording is available. Check your notifications.'
+            })
+        
+        # No recording found, notify the office about the request
+        notification = Notification(
+            user_id=session.counselor_id,
+            title="Recording Request",
+            message=f"Student {student.user.get_full_name()} has requested the recording of their counseling session on {session.scheduled_at.strftime('%Y-%m-%d')}.",
+            is_read=False
+        )
+        db.session.add(notification)
+        
+        # Log this activity
+        log_entry = StudentActivityLog(
+            student_id=student.id,
+            action=f"Requested recording for counseling session #{session_id}",
+            related_id=session.id,
+            related_type="counseling_session",
+            timestamp=datetime.utcnow(),
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string
+        )
+        db.session.add(log_entry)
+        
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': 'Recording request sent successfully.'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'message': f'Error requesting recording: {str(e)}'
+        })
+
+@student_bp.route('/video-session/<int:session_id>')
+@login_required
+@role_required(['student'])
+def join_video_session(session_id):
+    """Join a video counseling session"""
+    # Get the student record
+    student = Student.query.filter_by(user_id=current_user.id).first_or_404()
+    
+    # Get the session and verify ownership
+    session = CounselingSession.query.filter_by(
+        id=session_id,
+        student_id=student.id,
+        is_video_session=True
+    ).first_or_404()
+    
+    # Check if session is already completed
+    if session.status == 'completed':
+        flash('This session has already been completed. You can still view the details.', 'info')
+        return redirect(url_for('student.view_session', session_id=session_id))
+    
+    # Check if session is cancelled
+    if session.status == 'cancelled':
+        flash('This session has been cancelled.', 'warning')
+        return redirect(url_for('student.view_session', session_id=session_id))
+    
+    # Get counselor information if assigned
+    counselor = User.query.get(session.counselor_id) if session.counselor_id else None
+    
+    # If session doesn't have meeting details, generate them
+    if not session.meeting_id:
+        session.generate_meeting_details()
+        db.session.commit()
+    
+    # Update the session status if not already in progress, completed, or cancelled
+    now = datetime.utcnow()
+    if session.status not in ['in_progress', 'completed', 'cancelled']:
+        session.student_joined_at = now
+        session.status = 'in_progress'
+        
+        # Create participation record
+        participation = SessionParticipation(
+            session_id=session_id,
+            user_id=current_user.id,
+            joined_at=now,
+            device_info=request.user_agent.string,
+            ip_address=request.remote_addr
+        )
+        db.session.add(participation)
+    
+    # Log this activity
+    log_entry = StudentActivityLog(
+        student_id=student.id,
+        action=f"Joined video session #{session_id}",
+        related_id=session.id,
+        related_type="counseling_session",
+        timestamp=datetime.utcnow(),
+        ip_address=request.remote_addr,
+        user_agent=request.user_agent.string
+    )
+    db.session.add(log_entry)
+    db.session.commit()
+    
+    # Get unread notifications count for navbar
+    unread_notifications_count = Notification.query.filter_by(
+        user_id=current_user.id,
+        is_read=False
+    ).count()
+    
+    # Get notifications for dropdown
+    notifications = Notification.query.filter_by(
+        user_id=current_user.id
+    ).order_by(desc(Notification.created_at)).limit(5).all()
+    
+    return render_template(
+        'student/video_session.html',
+        session=session,
+        counselor=counselor,
+        meeting_id=session.meeting_id,
+        meeting_url=session.meeting_url,
+        meeting_password=session.meeting_password,
+        unread_notifications_count=unread_notifications_count,
+        notifications=notifications
+    )

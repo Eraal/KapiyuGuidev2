@@ -5,116 +5,205 @@ class AdminSocketManager {
     constructor(socketManager) {
         this.socketManager = socketManager;
         this.initialized = false;
+        this._activeFeatures = new Set();
+        this._featureEventHandlers = {};
     }
-    
+
     initialize() {
         if (!this.socketManager) {
             console.error('Base socket manager required');
             return;
         }
-        
+
         if (this.initialized) {
             console.warn('AdminSocketManager already initialized');
             return;
         }
-        
+
         console.log('Initializing AdminSocketManager');
-        
+
         // Setup event listeners for socket connection
         document.addEventListener('socket:connected', () => {
             console.log('Socket connected, joining admin room...');
             this.socketManager.emit('join_admin_room');
-            
+
             // Debug output to verify connection
             console.log('Current socket state:');
             this.socketManager.debug();
         });
-        
+
         // Handle room join confirmation
         this.socketManager.on('room_joined', (data) => {
             console.log('Successfully joined admin room:', data);
             this._showNotification(`Connected to real-time updates as ${data.role}`, 'success');
         });
-        
+
         // Initialize admin-specific handlers
         this._setupEventHandlers();
-        
-        // Initialize page-specific handlers based on current page
-        this._initializePageHandlers();
-        
+
+        // Initialize page-specific features based on current page
+        this._activatePageFeatures();
+
         this.initialized = true;
     }
 
-    _initializePageHandlers() {
+    // Method to activate a specific feature
+    activateFeature(feature) {
+        if (this._activeFeatures.has(feature)) {
+            console.log(`Feature ${feature} is already active`);
+            return;
+        }
+
+        console.log(`Activating admin feature: ${feature}`);
+
+        switch (feature) {
+            case 'dashboard':
+                this._setupDashboardHandlers();
+                break;
+            case 'audit':
+                this._setupAuditHandlers();
+                break;
+            case 'admin-management':
+                this._setupAdminManagementHandlers();
+                break;
+            case 'announcement':
+                this._setupAnnouncementHandlers();
+                break;
+            case 'notification':
+                this._setupNotificationHandlers();
+                break;
+            default:
+                console.warn(`Unknown feature: ${feature}`);
+                return;
+        }
+
+        this._activeFeatures.add(feature);
+    }
+
+    // Method to deactivate a specific feature
+    deactivateFeature(feature) {
+        if (!this._activeFeatures.has(feature)) {
+            console.log(`Feature ${feature} is not active`);
+            return;
+        }
+
+        console.log(`Deactivating admin feature: ${feature}`);
+        this.cleanupFeatureHandlers(feature);
+        this._activeFeatures.delete(feature);
+    }
+
+    // Clean up event handlers for a specific feature
+    cleanupFeatureHandlers(feature) {
+        if (!this._featureEventHandlers[feature]) {
+            return;
+        }
+
+        // Remove all handlers for this feature
+        this._featureEventHandlers[feature].forEach(item => {
+            this.socketManager.socket.off(item.event, item.handler);
+        });
+
+        // Clear the handler list
+        this._featureEventHandlers[feature] = [];
+        console.log(`Cleaned up handlers for feature: ${feature}`);
+    }
+
+    // Register an event handler for a specific feature
+    on(event, handler, feature = 'general') {
+        // Store the handler by feature for management
+        if (!this._featureEventHandlers[feature]) {
+            this._featureEventHandlers[feature] = [];
+        }
+
+        this._featureEventHandlers[feature].push({
+            event: event,
+            handler: handler
+        });
+
+        // Register with socket
+        this.socketManager.on(event, handler);
+    }
+
+    _activatePageFeatures() {
         // Check the current page
         const isDashboard = document.getElementById('admin-dashboard');
         const isAuditLogs = document.getElementById('audit-logs');
-        const isAdminManage = document.getElementById('adminmanage') || 
-                             document.location.href.includes('adminmanage');
-        
-        console.log('Initializing page handlers:', {
-            isDashboard, isAuditLogs, isAdminManage
+        const isAdminManage = document.getElementById('adminmanage') ||
+            document.location.href.includes('adminmanage');
+        const hasAnnouncementForm = document.getElementById('create-announcement-form');
+
+        console.log('Detecting page features:', {
+            isDashboard, isAuditLogs, isAdminManage, hasAnnouncementForm
         });
-        
+
+        // Always activate notifications
+        this.activateFeature('notification');
+
         if (isDashboard) {
-            this._initializeAdminDashboard();
+            this.activateFeature('dashboard');
         }
-        
+
         if (isAuditLogs) {
-            this._initializeAuditLogs();
+            this.activateFeature('audit');
         }
 
         if (isAdminManage) {
-            this._initializeAdminManage();
+            this.activateFeature('admin-management');
+        }
+
+        if (hasAnnouncementForm) {
+            this.activateFeature('announcement');
         }
     }
 
     _setupEventHandlers() {
         console.log('Setting up common event handlers');
-        
+
         // Add debug handler to see when events come in
-        this.socketManager.on('*', (eventName, data) => {
+        this.on('*', (eventName, data) => {
             console.log(`Received event: ${eventName}`, data);
-        });
-        
+        }, 'general');
+    }
+
+    _setupNotificationHandlers() {
         // Your existing event handlers...
-        this.socketManager.on('system_alert', (data) => {
+        this.on('system_alert', (data) => {
             console.log('Received system alert:', data);
             this._showSystemAlert(data);
-        });
-        
-        this.socketManager.on('user_activity', (data) => {
+        }, 'notification');
+
+        this.on('user_activity', (data) => {
             console.log('Received user activity:', data);
             this._updateUserActivity(data);
-        });
+        }, 'notification');
     }
 
-    _initializeAdminDashboard() {
+    _setupDashboardHandlers() {
         // Real-time system stats updates
-        this.socketManager.on('system_stats_update', (data) => {
+        this.on('system_stats_update', (data) => {
             this._updateSystemStats(data);
-        });
-        
+        }, 'dashboard');
+
         // User login/logout events
-        this.socketManager.on('user_status_change', (data) => {
+        this.on('user_status_change', (data) => {
             this._updateActiveUsersList(data);
-        });
+        }, 'dashboard');
     }
 
-    _initializeAuditLogs() {
+    _setupAuditHandlers() {
         // Real-time audit log updates
-        this.socketManager.on('new_audit_log', (data) => {
+        this.on('new_audit_log', (data) => {
             this._prependAuditLog(data);
-        });
+        }, 'audit');
     }
 
     _setupAnnouncementHandlers() {
         const announcementForm = document.getElementById('create-announcement-form');
         if (!announcementForm) return;
-        
+
         announcementForm.addEventListener('submit', (e) => {
             e.preventDefault();
-            
+
             const formData = new FormData(announcementForm);
             const announcementData = {
                 title: formData.get('title'),
@@ -122,7 +211,7 @@ class AdminSocketManager {
                 target_office_id: formData.get('target_office_id') || null,
                 is_public: formData.get('is_public') === 'on'
             };
-            
+
             // First submit via AJAX
             fetch(announcementForm.action, {
                 method: 'POST',
@@ -132,33 +221,42 @@ class AdminSocketManager {
                 },
                 body: JSON.stringify(announcementData)
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    // Emit socket event for real-time update
-                    this.socketManager.emit('admin_announcement_created', {
-                        id: data.announcement_id,
-                        title: announcementData.title,
-                        content: announcementData.content,
-                        target_office_id: announcementData.target_office_id,
-                        is_public: announcementData.is_public,
-                        author_name: document.body.dataset.userName
-                    });
-                    
-                    // Reset form
-                    announcementForm.reset();
-                    
-                    // Show success message
-                    this._showNotification('Announcement created successfully');
-                } else {
-                    this._showNotification('Error creating announcement: ' + data.message);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                this._showNotification('Error creating announcement');
-            });
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        // Emit socket event for real-time update
+                        this.socketManager.emit('admin_announcement_created', {
+                            id: data.announcement_id,
+                            title: announcementData.title,
+                            content: announcementData.content,
+                            target_office_id: announcementData.target_office_id,
+                            is_public: announcementData.is_public,
+                            author_name: document.body.dataset.userName
+                        });
+
+                        // Reset form
+                        announcementForm.reset();
+
+                        // Show success message
+                        this._showNotification('Announcement created successfully');
+                    } else {
+                        this._showNotification('Error creating announcement: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    this._showNotification('Error creating announcement');
+                });
         });
+
+        // Listen for announcement-related events
+        this.on('announcement_created', (data) => {
+            this._showNotification(`New announcement created: ${data.title}`, 'info');
+        }, 'announcement');
+
+        this.on('announcement_updated', (data) => {
+            this._showNotification(`Announcement updated: ${data.title}`, 'info');
+        }, 'announcement');
     }
 
     _updateSystemStats(data) {
@@ -174,7 +272,7 @@ class AdminSocketManager {
     _updateActiveUsersList(data) {
         const activeUsersList = document.getElementById('active-users-list');
         if (!activeUsersList) return;
-        
+
         if (data.action === 'login') {
             // Check if user already exists in the list
             const existingUser = document.getElementById(`user-${data.user_id}`);
@@ -201,7 +299,7 @@ class AdminSocketManager {
     _prependAuditLog(log) {
         const auditLogsList = document.getElementById('audit-logs-list');
         if (!auditLogsList) return;
-        
+
         const logItem = document.createElement('tr');
         logItem.className = 'bg-yellow-50'; // Highlight new logs
         logItem.innerHTML = `
@@ -216,10 +314,10 @@ class AdminSocketManager {
                 </span>
             </td>
         `;
-        
+
         // Add to beginning of the list
         auditLogsList.insertBefore(logItem, auditLogsList.firstChild);
-        
+
         // Remove highlight after 5 seconds
         setTimeout(() => {
             logItem.classList.remove('bg-yellow-50');
@@ -230,7 +328,7 @@ class AdminSocketManager {
         // Create alert element
         const alertDiv = document.createElement('div');
         alertDiv.className = `fixed bottom-5 right-5 p-4 rounded shadow-lg z-50 ${data.level === 'error' ? 'bg-red-600' : data.level === 'warning' ? 'bg-yellow-600' : 'bg-green-600'} text-white`;
-        
+
         // Set alert content
         alertDiv.innerHTML = `
             <div class="flex items-center">
@@ -250,10 +348,10 @@ class AdminSocketManager {
                 </button>
             </div>
         `;
-        
+
         // Add to DOM
         document.body.appendChild(alertDiv);
-        
+
         // Auto-remove after timeout
         setTimeout(() => {
             if (alertDiv.parentNode) {
@@ -261,15 +359,15 @@ class AdminSocketManager {
             }
         }, data.timeout || 5000);
     }
-    
+
     _updateUserActivity(data) {
         const activityLog = document.getElementById('user-activity-log');
         if (!activityLog) return;
-        
+
         // Create activity item
         const activityItem = document.createElement('div');
         activityItem.className = 'p-3 border-b border-gray-200 flex items-center';
-        
+
         // Set activity icon based on action type
         let iconHtml = '';
         if (data.action_type === 'login') {
@@ -291,7 +389,7 @@ class AdminSocketManager {
                 </svg>
             </div>`;
         }
-        
+
         // Fill activity content
         activityItem.innerHTML = `
             ${iconHtml}
@@ -303,31 +401,30 @@ class AdminSocketManager {
                 <p class="text-xs text-gray-500">${this._formatDateTime(data.timestamp)}</p>
             </div>
         `;
-        
+
         // Add to activity log
         activityLog.insertBefore(activityItem, activityLog.firstChild);
-        
+
         // Limit to 50 entries
         while (activityLog.children.length > 50) {
             activityLog.removeChild(activityLog.lastChild);
         }
     }
-    
+
     _showNotification(message, type = 'success') {
         const notificationContainer = document.getElementById('notification-container');
         if (!notificationContainer) return;
-        
+
         const notification = document.createElement('div');
-        notification.className = `p-3 rounded shadow-md mb-2 ${
-            type === 'success' ? 'bg-green-600' : 
-            type === 'error' ? 'bg-red-600' : 
-            type === 'warning' ? 'bg-yellow-600' : 'bg-blue-600'
-        } text-white`;
-        
+        notification.className = `p-3 rounded shadow-md mb-2 ${type === 'success' ? 'bg-green-600' :
+                type === 'error' ? 'bg-red-600' :
+                    type === 'warning' ? 'bg-yellow-600' : 'bg-blue-600'
+            } text-white`;
+
         notification.textContent = message;
-        
+
         notificationContainer.appendChild(notification);
-        
+
         // Auto-remove after 5 seconds
         setTimeout(() => {
             if (notification.parentNode) {
@@ -335,10 +432,10 @@ class AdminSocketManager {
             }
         }, 5000);
     }
-    
+
     _formatDateTime(timestamp) {
         if (!timestamp) return 'unknown time';
-        
+
         const date = new Date(timestamp);
         return date.toLocaleString('en-US', {
             month: 'short',
@@ -349,9 +446,9 @@ class AdminSocketManager {
         });
     }
 
-    _initializeAdminManage() {
+    _setupAdminManagementHandlers() {
         console.log('Initializing admin management page socket handlers');
-        
+
         // Debug output for incoming events
         const events = [
             'dashboard_stats_update',
@@ -361,33 +458,33 @@ class AdminSocketManager {
             'office_admin_removed',
             'admin_password_reset'
         ];
-        
+
         events.forEach(event => {
-            this.socketManager.on(event, (data) => {
+            this.on(event, (data) => {
                 console.log(`Received ${event} event:`, data);
-            });
+            }, 'admin-management');
         });
-        
+
         // Handle dashboard stats updates
-        this.socketManager.on('dashboard_stats_update', (data) => {
+        this.on('dashboard_stats_update', (data) => {
             console.log('Processing dashboard stats update:', data);
             this._updateAdminStats(data);
-        });
-        
+        }, 'admin-management');
+
         // Handle admin added event
-        this.socketManager.on('admin_added', (data) => {
+        this.on('admin_added', (data) => {
             console.log('Processing admin added:', data);
             this._updateAdminTable(data, 'add');
-        });
-        
+        }, 'admin-management');
+
         // Handle admin updated event
-        this.socketManager.on('admin_updated', (data) => {
+        this.on('admin_updated', (data) => {
             console.log('Processing admin updated:', data);
-            
+
             // Extract the admin data and changes
             const adminData = data.admin || {};
             const changes = data.changes || {};
-            
+
             // Apply changes to adminData
             if (changes.office !== undefined) {
                 adminData.office = changes.office;
@@ -396,27 +493,27 @@ class AdminSocketManager {
                     adminData.office_name = null;
                 }
             }
-            
+
             this._updateAdminTable(adminData, 'update');
-        });
-        
+        }, 'admin-management');
+
         // Handle admin deleted event
-        this.socketManager.on('admin_deleted', (data) => {
+        this.on('admin_deleted', (data) => {
             console.log('Processing admin deleted:', data);
             this._updateAdminTable(data, 'delete');
-        });
-        
+        }, 'admin-management');
+
         // Handle office admin removed from office
-        this.socketManager.on('office_admin_removed', (data) => {
+        this.on('office_admin_removed', (data) => {
             console.log('Office admin removed:', data);
             this._updateAdminOfficeAssignment(data.admin_id, null);
-        });
-        
+        }, 'admin-management');
+
         // Handle admin password reset
-        this.socketManager.on('admin_password_reset', (data) => {
+        this.on('admin_password_reset', (data) => {
             console.log('Admin password reset:', data);
             this._showNotification(`Password reset successfully for ${data.admin_name}`, 'success');
-        });
+        }, 'admin-management');
     }
 
     _updateAdminStats(data) {
@@ -425,17 +522,17 @@ class AdminSocketManager {
             const element = document.getElementById('activeAdminsCounter');
             if (element) element.textContent = data.active_office_admins;
         }
-        
+
         if (data.total_offices !== undefined) {
             const element = document.getElementById('totalOfficesCounter');
             if (element) element.textContent = data.total_offices;
         }
-        
+
         if (data.unassigned_offices !== undefined) {
             const element = document.getElementById('unassignedOfficesCounter');
             if (element) element.textContent = data.unassigned_offices;
         }
-        
+
         if (data.unassigned_admins !== undefined) {
             const element = document.getElementById('unassignedAdminsCounter');
             if (element) element.textContent = data.unassigned_admins;
@@ -443,152 +540,149 @@ class AdminSocketManager {
     }
 
     // Add this helper method to update the admin table
-_updateAdminTable(adminData, action) {
-    const adminTable = document.getElementById('admin-table');
-    if (!adminTable) return;
-    
-    const adminTableBody = adminTable.querySelector('tbody') || adminTable;
-    
-    if (action === 'add') {
-        // Create new row for the admin
-        const newRow = document.createElement('tr');
-        newRow.id = `admin-row-${adminData.id}`;
-        newRow.innerHTML = this._generateAdminRowHTML(adminData);
-        adminTableBody.prepend(newRow);
-        
-        // Highlight the new row
-        newRow.classList.add('bg-green-50');
-        setTimeout(() => {
-            newRow.classList.remove('bg-green-50');
-        }, 5000);
-        
-        this._showNotification(`Added new admin: ${adminData.first_name} ${adminData.last_name}`, 'success');
-    } 
-    else if (action === 'update') {
-       // Find existing row
-       const existingRow = document.getElementById(`admin-row-${adminData.id}`);
-       console.log('Existing row found:', !!existingRow);
-       
-       if (existingRow) {
-           // Make sure we're getting all the necessary data
-           console.log('Admin data for update:', adminData);
-           
-           // Update the row content
-           existingRow.innerHTML = this._generateAdminRowHTML(adminData);
-           
-           // Highlight the updated row
-           existingRow.classList.add('bg-yellow-50');
-           setTimeout(() => {
-               existingRow.classList.remove('bg-yellow-50');
-           }, 5000);
-           
-           this._showNotification(`Updated admin: ${adminData.first_name} ${adminData.last_name}`, 'success');
-       } else {
-           console.warn(`Could not find row for admin ID ${adminData.id}`);
-       }
-   }
-    else if (action === 'delete') {
-        // Find and remove the row
-        const existingRow = document.getElementById(`admin-row-${adminData.id}`);
-        if (existingRow) {
-            // Fade out effect
-            existingRow.style.transition = 'opacity 0.5s';
-            existingRow.style.opacity = '0';
-            
-            setTimeout(() => {
-                existingRow.remove();
-            }, 500);
-            
-            this._showNotification(`Deleted admin: ${adminData.name}`, 'success');
-        }
-    }
-}
+    _updateAdminTable(adminData, action) {
+        const adminTable = document.getElementById('admin-table');
+        if (!adminTable) return;
 
-// Helper to generate admin row HTML
-_generateAdminRowHTML(admin) {
-    console.log('Generating HTML for admin:', admin);
-    
-    // Make sure office_name is properly extracted
-    let officeName = 'Not Assigned';
-    if (admin.office && admin.office.name) {
-        officeName = admin.office.name;
-    } else if (admin.office_name) {
-        officeName = admin.office_name;
-    }
-    
-    return `
-        <td class="px-4 py-2 border">${admin.id}</td>
-        <td class="px-4 py-2 border">
-            <div class="flex items-center">
-                ${admin.profile_pic ? 
-                    `<img src="/static/${admin.profile_pic}" class="w-8 h-8 rounded-full mr-2">` : 
-                    `<div class="w-8 h-8 bg-gray-200 rounded-full mr-2 flex items-center justify-center">
-                        <span class="text-gray-500 text-xs">${admin.first_name[0]}${admin.last_name[0]}</span>
-                    </div>`
-                }
-                <span>${admin.first_name} ${admin.middle_name ? admin.middle_name + ' ' : ''}${admin.last_name}</span>
-            </div>
-        </td>
-        <td class="px-4 py-2 border">${admin.email}</td>
-        <td class="px-4 py-2 border">${officeName}</td>
-        <td class="px-4 py-2 border">
-            <span class="px-2 py-1 rounded-full ${admin.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
-                ${admin.is_active ? 'Active' : 'Inactive'}
-            </span>
-        </td>
-        <td class="px-4 py-2 border">
-            <div class="flex space-x-2">
-                <button class="bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600" 
-                        onclick="editAdmin(${admin.id})">
-                    Edit
-                </button>
-                <button class="bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600"
-                        onclick="deleteAdmin(${admin.id})">
-                    Delete
-                </button>
-            </div>
-        </td>
-    `;
-}
+        const adminTableBody = adminTable.querySelector('tbody') || adminTable;
 
-// Helper to update office assignment display
-_updateAdminOfficeAssignment(adminId, officeName) {
-    const adminRow = document.getElementById(`admin-row-${adminId}`);
-    if (adminRow) {
-        const officeCell = adminRow.querySelector('td:nth-child(4)');
-        if (officeCell) {
-            officeCell.textContent = officeName || 'Not Assigned';
-            
-            // Highlight the cell
-            officeCell.classList.add('bg-yellow-100');
+        if (action === 'add') {
+            // Create new row for the admin
+            const newRow = document.createElement('tr');
+            newRow.id = `admin-row-${adminData.id}`;
+            newRow.innerHTML = this._generateAdminRowHTML(adminData);
+            adminTableBody.prepend(newRow);
+
+            // Highlight the new row
+            newRow.classList.add('bg-green-50');
             setTimeout(() => {
-                officeCell.classList.remove('bg-yellow-100');
+                newRow.classList.remove('bg-green-50');
             }, 5000);
+
+            this._showNotification(`Added new admin: ${adminData.first_name} ${adminData.last_name}`, 'success');
+        }
+        else if (action === 'update') {
+            // Find existing row
+            const existingRow = document.getElementById(`admin-row-${adminData.id}`);
+            console.log('Existing row found:', !!existingRow);
+
+            if (existingRow) {
+                // Make sure we're getting all the necessary data
+                console.log('Admin data for update:', adminData);
+
+                // Update the row content
+                existingRow.innerHTML = this._generateAdminRowHTML(adminData);
+
+                // Highlight the updated row
+                existingRow.classList.add('bg-yellow-50');
+                setTimeout(() => {
+                    existingRow.classList.remove('bg-yellow-50');
+                }, 5000);
+
+                this._showNotification(`Updated admin: ${adminData.first_name} ${adminData.last_name}`, 'success');
+            } else {
+                console.warn(`Could not find row for admin ID ${adminData.id}`);
+            }
+        }
+        else if (action === 'delete') {
+            // Find and remove the row
+            const existingRow = document.getElementById(`admin-row-${adminData.id}`);
+            if (existingRow) {
+                // Fade out effect
+                existingRow.style.transition = 'opacity 0.5s';
+                existingRow.style.opacity = '0';
+
+                setTimeout(() => {
+                    existingRow.remove();
+                }, 500);
+
+                this._showNotification(`Deleted admin: ${adminData.name}`, 'success');
+            }
+        }
+    }
+
+    // Helper to generate admin row HTML
+    _generateAdminRowHTML(admin) {
+        console.log('Generating HTML for admin:', admin);
+
+        // Make sure office_name is properly extracted
+        let officeName = 'Not Assigned';
+        if (admin.office && admin.office.name) {
+            officeName = admin.office.name;
+        } else if (admin.office_name) {
+            officeName = admin.office_name;
+        }
+
+        return `
+            <td class="px-4 py-2 border">${admin.id}</td>
+            <td class="px-4 py-2 border">
+                <div class="flex items-center">
+                    ${admin.profile_pic ?
+                `<img src="/static/${admin.profile_pic}" class="w-8 h-8 rounded-full mr-2">` :
+                `<div class="w-8 h-8 bg-gray-200 rounded-full mr-2 flex items-center justify-center">
+                            <span class="text-gray-500 text-xs">${admin.first_name[0]}${admin.last_name[0]}</span>
+                        </div>`
+            }
+                    <span>${admin.first_name} ${admin.middle_name ? admin.middle_name + ' ' : ''}${admin.last_name}</span>
+                </div>
+            </td>
+            <td class="px-4 py-2 border">${admin.email}</td>
+            <td class="px-4 py-2 border">${officeName}</td>
+            <td class="px-4 py-2 border">
+                <span class="px-2 py-1 rounded-full ${admin.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                    ${admin.is_active ? 'Active' : 'Inactive'}
+                </span>
+            </td>
+            <td class="px-4 py-2 border">
+                <div class="flex space-x-2">
+                    <button class="bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600" 
+                            onclick="editAdmin(${admin.id})">
+                        Edit
+                    </button>
+                    <button class="bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600"
+                            onclick="deleteAdmin(${admin.id})">
+                        Delete
+                    </button>
+                </div>
+            </td>
+        `;
+    }
+
+    // Helper to update office assignment display
+    _updateAdminOfficeAssignment(adminId, officeName) {
+        const adminRow = document.getElementById(`admin-row-${adminId}`);
+        if (adminRow) {
+            const officeCell = adminRow.querySelector('td:nth-child(4)');
+            if (officeCell) {
+                officeCell.textContent = officeName || 'Not Assigned';
+
+                // Highlight the cell
+                officeCell.classList.add('bg-yellow-100');
+                setTimeout(() => {
+                    officeCell.classList.remove('bg-yellow-100');
+                }, 5000);
+            }
         }
     }
 }
 
+// Export the AdminSocketManager class for usage
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = AdminSocketManager;
+} else {
+    // Create global instance when in browser
+    window.adminSocketManager = null;
 
-    }
-    
-    
-    // Export the AdminSocketManager class for usage
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = AdminSocketManager;
-    } else {
-        // Create global instance when in browser
-        window.adminSocketManager = new AdminSocketManager(window.socketManager);
-        
-        // Initialize when DOM is ready
-        document.addEventListener('DOMContentLoaded', () => {
-            // Wait a moment for socketManager to initialize
-            setTimeout(() => {
-                if (window.socketManager) {
-                    window.adminSocketManager = new AdminSocketManager(window.socketManager);
-                    window.adminSocketManager.initialize();
-                } else {
-                    console.error('socketManager not found. Make sure socket.js is loaded first.');
-                }
-            }, 100);
-        });
-    }
+    // Initialize when DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+        // Wait a moment for socketManager to initialize
+        setTimeout(() => {
+            if (window.socketManager) {
+                window.adminSocketManager = new AdminSocketManager(window.socketManager);
+                window.adminSocketManager.initialize();
+            } else {
+                console.error('socketManager not found. Make sure socket.js is loaded first.');
+            }
+        }, 100);
+    });
+}

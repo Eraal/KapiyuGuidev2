@@ -497,56 +497,86 @@
     
     // Initialize the chat manager for real-time features
     if (window.io) {
-      console.log('DEBUG: Initializing Socket.IO for inquiry {{ inquiry.id }}');
-      const socket = io();
+      console.log('[INQUIRY CHAT] Initializing dedicated Socket.IO for inquiry {{ inquiry.id }}');
       
-      // Debug all incoming Socket.IO events
-      const originalOn = socket.on;
-      socket.on = function(eventName, callback) {
-        const wrappedCallback = function(...args) {
-          console.log(`DEBUG: Received Socket.IO event '${eventName}' with data:`, args);
-          return callback.apply(this, args);
-        };
-        return originalOn.call(this, eventName, wrappedCallback);
-      };
+      // Create a dedicated socket connection for inquiry chat only
+      // This avoids interference from the counseling module when it reuses the global socket
+      const socket = io({
+        forceNew: true, // Force a new connection to avoid sharing with other features
+        query: {
+          feature: 'inquiry_chat', 
+          inquiry_id: {{ inquiry.id }},
+          user_id: {{ current_user.id }},
+          role: '{{ current_user.role }}',
+          office_id: {{ current_user.office_admin.office_id }}
+        }
+      });
       
-      // Join inquiry-specific room for real-time updates
+      // For debug purposes, add console logs
       socket.on('connect', function() {
-        console.log('DEBUG: Connected to socket server, joining inquiry room for inquiry {{ inquiry.id }}');
+        console.log('[INQUIRY CHAT] Connected to socket server with dedicated inquiry connection');
+        
+        // Explicitly join inquiry-specific rooms
         socket.emit('join_inquiry_room', {
           inquiry_id: {{ inquiry.id }}
         });
         
-        // Also join the office room
-        const officeId = {{ current_user.office_admin.office_id }};
-        socket.emit('join', { room: `office_${officeId}` });
-        console.log(`DEBUG: Also joining office_${officeId} room`);
+        // Also join the office room with the inquiry context marker
+        socket.emit('join', { 
+          room: `office_${officeId}`,
+          context: 'inquiry_chat'
+        });
+        
+        // Join the inquiry view room
+        socket.emit('join', {
+          room: `inquiry_view_${inquiry.id}`
+        });
+        
+        console.log('[INQUIRY CHAT] Joined rooms for inquiry {{ inquiry.id }}');
       });
       
-      // Handle successful room join confirmation
-      socket.on('joined_inquiry_room', function(data) {
-        console.log('DEBUG: Successfully joined inquiry room:', data);
+      // Handle reconnection events specially for inquiry chat
+      socket.on('reconnect', function() {
+        console.log('[INQUIRY CHAT] Socket reconnected, rejoining inquiry rooms');
+        
+        socket.emit('join_inquiry_room', {
+          inquiry_id: {{ inquiry.id }}
+        });
+        
+        socket.emit('join', {
+          room: `inquiry_view_${inquiry.id}`
+        });
       });
       
       // Universal message handler for all incoming message events
       function handleIncomingMessage(data) {
-        console.log('DEBUG: Processing incoming message:', data);
+        console.log('[INQUIRY CHAT] Processing incoming message:', data);
         
         // Check if this message is for our inquiry
         if (data.inquiry_id != {{ inquiry.id }}) {
-          console.log('DEBUG: Message is for a different inquiry, ignoring');
+          console.log('[INQUIRY CHAT] Message is for a different inquiry, ignoring');
           return;
         }
         
         // Skip messages from this user (those will be handled by the form submission)
         if (data.sender_id == {{ current_user.id }}) {
-          console.log('DEBUG: Message is from current user, will be handled by form submission');
+          console.log('[INQUIRY CHAT] Message is from current user, will be handled by form submission');
           return;
         }
         
-        console.log('DEBUG: Rendering new message element');
+        console.log('[INQUIRY CHAT] Rendering new message element');
         // Create and add new message element
         const messageElement = renderMessageElement(data);
+        
+        // Check for duplicate messages (by ID)
+        if (data.id || data.message_id) {
+          const messageId = data.id || data.message_id;
+          const existingMessage = messageHistory.querySelector(`[data-message-id="${messageId}"]`);
+          if (existingMessage) {
+            console.log('[INQUIRY CHAT] Duplicate message detected, ignoring');
+            return;
+          }
+        }
         
         // Add to message container
         if (messageHistory) {
@@ -567,7 +597,7 @@
             sender_id: data.sender_id
           });
           
-          console.log(`DEBUG: Message marked as delivered, message_id: ${data.message_id || data.id}`);
+          console.log(`[INQUIRY CHAT] Message marked as delivered, message_id: ${data.message_id || data.id}`);
         }
       }
       
@@ -578,7 +608,7 @@
       
       // Listen for typing indicators
       socket.on('user_typing', function(data) {
-        console.log('DEBUG: User typing indicator received:', data);
+        console.log('[INQUIRY CHAT] User typing indicator received:', data);
         if (data.inquiry_id != {{ inquiry.id }}) return;
         
         const typingIndicator = document.getElementById('typingIndicator');
@@ -606,7 +636,8 @@
         }
       });
       
-      // Initialize the inquiry chat
+      // Initialize the inquiry chat with our dedicated socket
+      const officeId = {{ current_user.office_admin.office_id }};
       const inquiryChat = new InquiryChat({
         socket: socket,
         messageInput: document.getElementById('messageInput'),
@@ -677,7 +708,8 @@
             body: formData,
             credentials: 'same-origin',
             headers: {
-              'X-Requested-With': 'XMLHttpRequest' // Add this to ensure server recognizes it as AJAX
+              'X-Requested-With': 'XMLHttpRequest', // Add this to ensure server recognizes it as AJAX
+              'X-Inquiry-Session': 'true' // Mark this as inquiry-specific request
             }
           })
           .then(response => {
@@ -687,7 +719,7 @@
             return response.json();
           })
           .then(data => {
-            console.log('Message sent successfully:', data);
+            console.log('[INQUIRY CHAT] Message sent successfully:', data);
             
             // Update the temporary message with the real ID if available
             if (data && data.message_id) {
@@ -700,10 +732,10 @@
             // The WebSocket system will handle any further real-time updates
           })
           .catch(error => {
-            console.error('Error sending message:', error);
+            console.error('[INQUIRY CHAT] Error sending message:', error);
             // Show an error message to the user
             const errorDiv = document.createElement('div');
-            errorDiv.className = 'text-red-500 text-sm mt-2';
+            errorDiv.className = 'text-red-500 text-sm mt-2 text-center';
             errorDiv.textContent = 'Error sending message. Please try again.';
             messageForm.appendChild(errorDiv);
             
@@ -781,6 +813,27 @@
             </div>
             <div class="text-sm">${(message.content || '').replace(/\n/g, '<br>')}</div>
             
+            ${message.attachments ? `
+              <div class="mt-3 flex flex-wrap gap-2">
+                ${message.attachments.map(attachment => `
+                  <a href="${attachment.file_path}" target="_blank" class="block">
+                    ${attachment.file_path.endsWith('.jpg') || attachment.file_path.endsWith('.jpeg') ||
+                      attachment.file_path.endsWith('.png') || attachment.file_path.endsWith('.gif') ?
+                      `<img src="${attachment.file_path}" alt="Attachment" class="attachment-preview" />` :
+                      `<div class="bg-gray-100 p-2 rounded flex items-center">
+                        ${attachment.file_path.endsWith('.pdf') ?
+                          '<i class="far fa-file-pdf text-red-500 mr-1"></i>' :
+                          attachment.file_path.endsWith('.doc') || attachment.file_path.endsWith('.docx') ?
+                          '<i class="far fa-file-word text-blue-500 mr-1"></i>' :
+                          '<i class="far fa-file text-gray-500 mr-1"></i>'}
+                        <span class="text-xs">${attachment.filename || 'Attachment'}</span>
+                      </div>`
+                    }
+                  </a>
+                `).join('')}
+              </div>
+            ` : ''}
+            
             ${isSentByMe ? `
             <div class="message-status text-xs text-right mt-1">
               <span class="status-icon">
@@ -834,6 +887,15 @@
           });
         }
       }
+      
+      // Clean up socket connection when leaving the page
+      window.addEventListener('beforeunload', function() {
+        // Disconnect the inquiry-specific socket
+        if (socket) {
+          console.log('[INQUIRY CHAT] Disconnecting socket on page unload');
+          socket.disconnect();
+        }
+      });
     }
   });
 </script>

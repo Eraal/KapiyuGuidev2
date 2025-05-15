@@ -1,197 +1,260 @@
 /**
- * ProgressiveChatLoader - Efficiently load chat messages progressively 
+ * Progressive Chat Loader with Connection Monitoring
  * 
- * Features:
- * - Initially loads only latest 6 messages
- * - Loads older messages on-demand when scrolling up
- * - Maintains scroll position when loading older messages
- * - Shows loading indicator during message fetching
- * - Stops trying to load more when all messages are loaded
+ * This script provides:
+ * 1. Progressive loading of chat scripts based on page needs
+ * 2. Connection status monitoring and recovery
+ * 3. Automatic resource management
  */
 
 class ProgressiveChatLoader {
-    /**
-     * Create a ProgressiveChatLoader instance
-     * @param {Object} config - Configuration options
-     * @param {HTMLElement} config.messageContainer - Container where messages are displayed
-     * @param {number} config.inquiryId - ID of the current inquiry
-     * @param {Function} config.renderMessage - Function to render a message (receives message data)
-     * @param {Function} config.onLoadComplete - Callback when messages are loaded (optional)
-     * @param {string} config.apiEndpoint - API endpoint URL for loading messages (defaults to "/api/inquiry/{id}/messages")
-     * @param {number} config.loadThreshold - Scroll position threshold to trigger loading (in pixels from top)
-     * @param {number} config.batchSize - Number of messages to load per request
-     */
-    constructor(config) {
-        this.messageContainer = config.messageContainer;
-        this.inquiryId = config.inquiryId;
-        this.renderMessage = config.renderMessage;
-        this.onLoadComplete = config.onLoadComplete || function () { };
-        this.apiEndpoint = config.apiEndpoint || `/api/inquiry/${config.inquiryId}/messages`;
-        this.loadThreshold = config.loadThreshold || 100;
-        this.batchSize = config.batchSize || 6;
-
-        // Internal state
-        this.isLoading = false;
-        this.hasMoreMessages = true;
-        this.oldestMessageId = null;
-        this.loadingIndicator = null;
-
-        // Initialize
-        this.init();
+    constructor() {
+        this.loadedScripts = new Set();
+        this.connectionMonitor = null;
+        this.connectionStatus = true; // assume connected initially
+        this.connectionAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.initialized = false;
     }
 
     /**
      * Initialize the loader
      */
     init() {
-        // Create loading indicator
-        this.createLoadingIndicator();
+        if (this.initialized) return;
 
-        // Add scroll event listener
-        this.messageContainer.addEventListener('scroll', this.handleScroll.bind(this));
+        console.log('[ProgressiveChatLoader] Initializing');
 
-        // Initialize with latest messages
-        // Note: We assume the initial 6 messages are loaded server-side
-        // during the initial page render
+        // Setup connection monitoring
+        this.setupConnectionMonitor();
 
-        // Set the oldest message ID based on the first rendered message
-        const firstMessage = this.messageContainer.querySelector('[data-message-id]');
-        if (firstMessage) {
-            this.oldestMessageId = firstMessage.getAttribute('data-message-id');
-        }
+        // Load required scripts based on page
+        this.loadRequiredScripts();
 
-        console.log('ProgressiveChatLoader initialized');
+        this.initialized = true;
     }
 
     /**
-     * Create the loading indicator element
+     * Load a script dynamically
      */
-    createLoadingIndicator() {
-        this.loadingIndicator = document.createElement('div');
-        this.loadingIndicator.className = 'flex justify-center items-center py-4 hidden';
-        this.loadingIndicator.innerHTML = `
-            <div class="flex items-center space-x-2">
-                <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
-                <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
-                <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
-            </div>
-        `;
+    loadScript(src, callback = null) {
+        if (this.loadedScripts.has(src)) {
+            if (callback) callback();
+            return;
+        }
+
+        const script = document.createElement('script');
+        script.src = src;
+
+        if (callback) {
+            script.onload = () => {
+                this.loadedScripts.add(src);
+                callback();
+            };
+        } else {
+            script.onload = () => {
+                this.loadedScripts.add(src);
+            };
+        }
+
+        script.onerror = (err) => {
+            console.error('[ProgressiveChatLoader] Failed to load script:', src, err);
+        };
+
+        document.head.appendChild(script);
     }
 
     /**
-     * Handle scroll events
+     * Setup connection monitoring
      */
-    handleScroll() {
-        // If already loading or no more messages, don't do anything
-        if (this.isLoading || !this.hasMoreMessages) return;
-
-        // Check if we've scrolled near the top
-        if (this.messageContainer.scrollTop <= this.loadThreshold) {
-            this.loadOlderMessages();
-        }
-    }
-
-    /**
-     * Load older messages via API
-     */
-    loadOlderMessages() {
-        if (this.isLoading || !this.hasMoreMessages) return;
-
-        this.isLoading = true;
-
-        // Show loading indicator at the top of the message container
-        this.messageContainer.prepend(this.loadingIndicator);
-        this.loadingIndicator.classList.remove('hidden');
-
-        // Remember current scroll position and height
-        const scrollHeightBefore = this.messageContainer.scrollHeight;
-
-        // Build API URL with parameters
-        let apiUrl = `${this.apiEndpoint}?limit=${this.batchSize}`;
-        if (this.oldestMessageId) {
-            apiUrl += `&before_id=${this.oldestMessageId}`;
-        }
-
-        // Fetch older messages
-        fetch(apiUrl)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Failed to load older messages');
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.success) {
-                    // Remove loading indicator
-                    this.loadingIndicator.remove();
-
-                    // Check if there are more messages to load
-                    this.hasMoreMessages = data.has_more;
-
-                    if (data.messages && data.messages.length > 0) {
-                        // Update oldest message ID
-                        this.oldestMessageId = data.messages[0].id;
-
-                        // Insert messages at the beginning (we need to reverse them to maintain chronological order)
-                        data.messages.forEach(message => {
-                            // Create message element
-                            const messageElement = this.renderMessage(message);
-
-                            // Insert at the beginning of the container
-                            this.messageContainer.insertBefore(messageElement, this.messageContainer.firstChild);
-                        });
-
-                        // Maintain scroll position
-                        const newScrollHeight = this.messageContainer.scrollHeight;
-                        const heightDifference = newScrollHeight - scrollHeightBefore;
-                        this.messageContainer.scrollTop = heightDifference;
-
-                        // Call the callback
-                        this.onLoadComplete(data.messages);
-                    }
-                } else {
-                    console.error('Error loading messages:', data.message);
-                    this.loadingIndicator.remove();
-                }
-
-                this.isLoading = false;
-            })
-            .catch(error => {
-                console.error('Error fetching older messages:', error);
-                this.loadingIndicator.remove();
-                this.isLoading = false;
+    setupConnectionMonitor() {
+        // Check if connection manager is available
+        if (!window.connectionManager) {
+            console.log('[ProgressiveChatLoader] Connection manager not available, loading socket.js first');
+            this.loadScript('/static/js/socket.js', () => {
+                this.startConnectionMonitoring();
             });
-    }
-
-    /**
-     * Check if all messages have been loaded
-     * @returns {boolean} True if all messages are loaded
-     */
-    allMessagesLoaded() {
-        return !this.hasMoreMessages;
-    }
-
-    /**
-     * Reset the loader state
-     */
-    reset() {
-        this.isLoading = false;
-        this.hasMoreMessages = true;
-        this.oldestMessageId = null;
-
-        const firstMessage = this.messageContainer.querySelector('[data-message-id]');
-        if (firstMessage) {
-            this.oldestMessageId = firstMessage.getAttribute('data-message-id');
+        } else {
+            this.startConnectionMonitoring();
         }
     }
 
     /**
-     * Destroy the loader and remove event listeners
+     * Start monitoring connection status
      */
-    destroy() {
-        this.messageContainer.removeEventListener('scroll', this.handleScroll.bind(this));
-        if (this.loadingIndicator && this.loadingIndicator.parentNode) {
-            this.loadingIndicator.remove();
+    startConnectionMonitoring() {
+        console.log('[ProgressiveChatLoader] Setting up connection monitor');
+
+        // Use a status indicator element if available
+        this.statusIndicator = document.getElementById('connection-status') || this.createStatusIndicator();
+
+        // Listen for connection events
+        document.addEventListener('socket:connected', () => {
+            this.handleConnectionChange(true);
+        });
+
+        document.addEventListener('socket:disconnected', () => {
+            this.handleConnectionChange(false);
+        });
+
+        document.addEventListener('socket:reconnected', () => {
+            this.handleConnectionChange(true);
+        });
+
+        // Start periodic connection checking
+        this.connectionMonitor = setInterval(() => this.checkConnection(), 30000); // Check every 30s
+    }
+
+    /**
+     * Create a status indicator element if one doesn't exist
+     */
+    createStatusIndicator() {
+        const indicator = document.createElement('div');
+        indicator.id = 'connection-status';
+        indicator.className = 'fixed bottom-2 right-2 z-50 p-2 bg-gray-800 bg-opacity-75 rounded-full text-white text-xs';
+        indicator.style.display = 'none';
+        indicator.innerHTML = '<i class="fas fa-wifi"></i>';
+        document.body.appendChild(indicator);
+        return indicator;
+    }
+
+    /**
+     * Handle connection status changes
+     */
+    handleConnectionChange(isConnected) {
+        this.connectionStatus = isConnected;
+
+        if (isConnected) {
+            this.connectionAttempts = 0;
+            this.statusIndicator.style.display = 'none';
+            console.log('[ProgressiveChatLoader] Connection established');
+
+            // Dispatch event for other components
+            document.dispatchEvent(new CustomEvent('connection:status', {
+                detail: { status: 'connected' }
+            }));
+        } else {
+            this.statusIndicator.style.display = 'block';
+            this.statusIndicator.innerHTML = '<i class="fas fa-wifi text-red-500"></i>';
+            console.log('[ProgressiveChatLoader] Connection lost');
+
+            // Dispatch event for other components
+            document.dispatchEvent(new CustomEvent('connection:status', {
+                detail: { status: 'disconnected' }
+            }));
+
+            // Attempt reconnection if not already trying
+            if (this.connectionAttempts < this.maxReconnectAttempts) {
+                this.attemptReconnection();
+            }
+        }
+    }
+
+    /**
+     * Check connection status
+     */
+    checkConnection() {
+        // Skip if the window is not focused
+        if (document.hidden) return;
+
+        if (window.socketManager && window.socketManager.socketManager) {
+            const isConnected = window.socketManager.socketManager.isConnected;
+
+            // If our last known state doesn't match current state
+            if (this.connectionStatus !== isConnected) {
+                this.handleConnectionChange(isConnected);
+            }
+
+            // If we think we're connected, but haven't received events in a while
+            // We might need to check by sending a ping
+            if (this.connectionStatus && window.socketManager.socketManager.socket) {
+                window.socketManager.socketManager.socket.emit('ping', {}, (response) => {
+                    if (!response) {
+                        // No response to ping, we're probably disconnected
+                        this.handleConnectionChange(false);
+                    }
+                });
+            }
+        }
+    }
+
+    /**
+     * Attempt to reconnect
+     */
+    attemptReconnection() {
+        this.connectionAttempts++;
+        this.statusIndicator.innerHTML = `<i class="fas fa-sync-alt fa-spin"></i> Reconnecting (${this.connectionAttempts}/${this.maxReconnectAttempts})`;
+        console.log(`[ProgressiveChatLoader] Attempting reconnection ${this.connectionAttempts}/${this.maxReconnectAttempts}`);
+
+        // Try to reconnect via the connection manager
+        if (window.connectionManager) {
+            window.connectionManager.getConnection()
+                .then(() => {
+                    this.handleConnectionChange(true);
+                })
+                .catch(() => {
+                    if (this.connectionAttempts >= this.maxReconnectAttempts) {
+                        this.statusIndicator.innerHTML = '<i class="fas fa-wifi text-red-500"></i> Connection failed';
+                        console.log('[ProgressiveChatLoader] Max reconnection attempts reached');
+                    } else {
+                        // Try again after a delay
+                        setTimeout(() => this.attemptReconnection(), 5000);
+                    }
+                });
+        }
+    }
+
+    /**
+     * Load required scripts based on the current page
+     */
+    loadRequiredScripts() {
+        // Load core scripts
+        const scriptsToLoad = [];
+
+        // Check if we're on a page with chat functionality
+        if (document.querySelector('[data-chat-container]')) {
+            scriptsToLoad.push('/static/js/notification-sound-manager.js');
+            scriptsToLoad.push('/static/js/inquiry-chat.js');
+            scriptsToLoad.push('/static/js/chat-init.js');
+        }
+
+        // Check if we're on a page with video counseling
+        if (document.querySelector('#videoSession') || window.location.pathname.includes('/video-session/')) {
+            scriptsToLoad.push('/static/js/notification-sound-manager.js');
+        }
+
+        // Load scripts sequentially
+        if (scriptsToLoad.length > 0) {
+            let index = 0;
+            const loadNext = () => {
+                if (index < scriptsToLoad.length) {
+                    this.loadScript(scriptsToLoad[index], () => {
+                        index++;
+                        loadNext();
+                    });
+                }
+            };
+            loadNext();
+        }
+    }
+
+    /**
+     * Clean up resources
+     */
+    cleanup() {
+        if (this.connectionMonitor) {
+            clearInterval(this.connectionMonitor);
+        }
+
+        // Remove status indicator if we created it
+        if (this.statusIndicator && this.statusIndicator.parentNode && this.statusIndicator.id === 'connection-status') {
+            this.statusIndicator.parentNode.removeChild(this.statusIndicator);
         }
     }
 }
+
+// Initialize on DOM loaded
+document.addEventListener('DOMContentLoaded', () => {
+    window.chatLoader = new ProgressiveChatLoader();
+    window.chatLoader.init();
+});

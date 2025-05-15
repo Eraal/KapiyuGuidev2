@@ -64,5 +64,9 @@ def create_app():
     with app.app_context():
         from app.websockets import init_app as init_websocket
         init_websocket()
+        
+        # Initialize the video session scheduler
+        from app.office.routes.office_counseling import init_scheduler
+        init_scheduler(app)
     
     return app

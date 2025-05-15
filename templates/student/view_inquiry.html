@@ -670,7 +670,53 @@ KapiyuGuide{% endblock %} {% block extra_head %}
 
     // Initialize the chat manager for real-time features
     if (window.io) {
-      const socket = io();
+      // Create a dedicated socket connection for inquiry chat only
+      // This avoids interference from the counseling module when it reuses the global socket
+      const socket = io({
+        forceNew: true, // Force a new connection to avoid sharing with other features
+        query: {
+          feature: 'inquiry_chat',
+          inquiry_id: {{ inquiry.id }},
+          user_id: {{ current_user.id }},
+          role: '{{ current_user.role }}'
+        }
+      });
+
+      // Debug for connection issues
+      socket.on('connect', function() {
+        console.log('[INQUIRY CHAT] Connected to socket server with dedicated inquiry chat connection');
+
+        // Explicitly join inquiry-specific rooms
+        socket.emit('join_inquiry_room', {
+          inquiry_id: {{ inquiry.id }}
+        });
+
+        socket.emit('join', {
+          room: `inquiry_${inquiry.id}`
+        });
+
+        socket.emit('join', {
+          room: `inquiry_view_${inquiry.id}`
+        });
+      });
+
+      // Handle reconnection
+      socket.on('reconnect', function() {
+        console.log('[INQUIRY CHAT] Socket reconnected, rejoining inquiry rooms');
+
+        // Re-join inquiry rooms on reconnection
+        socket.emit('join_inquiry_room', {
+          inquiry_id: {{ inquiry.id }}
+        });
+
+        socket.emit('join', {
+          room: `inquiry_${inquiry.id}`
+        });
+
+        socket.emit('join', {
+          room: `inquiry_view_${inquiry.id}`
+        });
+      });
 
       // Initialize the inquiry chat
       const inquiryChat = new InquiryChat({
@@ -736,7 +782,11 @@ KapiyuGuide{% endblock %} {% block extra_head %}
           fetch('{{ url_for('student.reply_to_inquiry', inquiry_id=inquiry.id) }}', {
             method: 'POST',
             body: formData,
-            credentials: 'same-origin'
+            credentials: 'same-origin',
+            headers: {
+              'X-Inquiry-Session': 'true', // Add custom header to identify inquiry requests
+              'X-Requested-With': 'XMLHttpRequest'
+            }
           })
           .then(response => {
             if (!response.ok) {
@@ -746,11 +796,24 @@ KapiyuGuide{% endblock %} {% block extra_head %}
           })
           .then(data => {
             console.log('Message sent successfully');
-            // The WebSocket system will handle the real-time update
+            // Update temporary message with real ID if available
+            if (data && data.message_id) {
+              const tempMessageElement = messageHistory.querySelector(`[data-message-id="${tempMessageId}"]`);
+              if (tempMessageElement) {
+                tempMessageElement.setAttribute('data-message-id', data.message_id);
+              }
+            }
           })
           .catch(error => {
             console.error('Error sending message:', error);
             // Optionally show an error message to the user
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'text-red-500 text-sm mt-2 text-center';
+            errorDiv.textContent = 'Error sending message. Please try again.';
+            document.getElementById('messageForm').appendChild(errorDiv);
+
+            // Remove error message after 3 seconds
+            setTimeout(() => errorDiv.remove(), 3000);
           });
         });
       }
@@ -908,6 +971,11 @@ KapiyuGuide{% endblock %} {% block extra_head %}
           }
         }
       }
+
+      // Clean up socket connection when leaving the page to prevent memory leaks
+      window.addEventListener('beforeunload', function() {
+        socket.disconnect();
+      });
     }
   });
 </script>

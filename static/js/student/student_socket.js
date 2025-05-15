@@ -8,20 +8,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.head.appendChild(script);
     }
 
-    // First, make sure the base socket manager is loaded
-    if (typeof BaseSocketManager === 'undefined') {
-        loadScript('/static/js/socket.js', () => {
-            // Then load the student-specific socket manager
-            loadScript('/static/js/student/websockets/student_sockets.js', initializeStudentSockets);
-        });
-    } else {
-        // If base socket manager is already loaded, just load the student socket manager
-        loadScript('/static/js/student/websockets/student_sockets.js', initializeStudentSockets);
-    }
-
     function initializeStudentSockets() {
         // Create a student socket manager if it doesn't exist
         if (!window.studentSocketManager) {
+            console.log("DEBUG: Creating new student socket manager");
             window.studentSocketManager = new StudentSocketManager({
                 sound: true,
                 debug: true
@@ -30,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Initialize the socket connection
             window.studentSocketManager.initialize()
                 .then(() => {
-                    console.log('Student socket system initialized');
+                    console.log('DEBUG: Student socket system initialized successfully');
 
                     // Setup typing indicators for any chat inputs on the page
                     setupChatTypingIndicators();
@@ -42,9 +32,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     observeChatAdditions();
                 })
                 .catch(error => {
-                    console.error('Failed to initialize student socket system:', error);
+                    console.error('DEBUG: Failed to initialize student socket system:', error);
                 });
+        } else {
+            console.log("DEBUG: Using existing student socket manager");
+            // Ensure rooms are properly joined even when reusing the manager
+            window.studentSocketManager.rejoinRooms();
         }
+    }
+
+    // First, make sure the base socket manager is loaded
+    if (typeof BaseSocketManager === 'undefined') {
+        loadScript('/static/js/socket.js', () => {
+            // Then load the student-specific socket manager
+            loadScript('/static/js/student/websockets/student_sockets.js', initializeStudentSockets);
+        });
+    } else {
+        // If base socket manager is already loaded, just load the student socket manager
+        loadScript('/static/js/student/websockets/student_sockets.js', initializeStudentSockets);
     }
 
     // Find all chat inputs and set up typing indicators
@@ -52,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Look for chat message inputs in the DOM
         const chatInputs = document.querySelectorAll('.chat-input, .chat-message-input, [data-chat-input]');
 
-        console.log(`Found ${chatInputs.length} chat inputs to setup typing indicators`);
+        console.log(`DEBUG: Found ${chatInputs.length} chat inputs to setup typing indicators`);
 
         chatInputs.forEach(input => {
             // Get the inquiry and admin IDs from data attributes or parent elements
@@ -64,13 +69,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 chatContainer.dataset.adminId;
 
             if (inquiryId && officeAdminId && window.studentSocketManager) {
+                // Check if this input has already been initialized
+                if (input.dataset.typingTrackerInitialized === 'true') {
+                    return;
+                }
+
                 // Set up typing tracking for this input
                 window.studentSocketManager.setupTypingTracker(input, {
                     inquiry_id: inquiryId,
                     office_admin_id: officeAdminId
                 });
 
-                console.log(`Set up typing indicator for inquiry ${inquiryId} with admin ${officeAdminId}`);
+                console.log(`DEBUG: Set up typing indicator for inquiry ${inquiryId} with admin ${officeAdminId}`);
 
                 // Mark this input as initialized to avoid duplicates
                 input.dataset.typingTrackerInitialized = 'true';
@@ -105,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // If new chat elements were added, set up their typing indicators
             if (shouldCheckForChatInputs) {
-                console.log('New chat elements detected, setting up typing indicators');
+                console.log('DEBUG: New chat elements detected, setting up typing indicators');
                 setupChatTypingIndicators();
             }
         });

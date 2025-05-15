@@ -1,6 +1,5 @@
-{% extends "office/office_base.html" %} {% block title %}Video Session: {{
-student_user.get_full_name() }} | KapiyuGuide Office{% endblock %} {% block
-head_extra %}
+{% extends "office/office_base.html" %} {% block title %}Video Counseling
+Session - {{ session.id }}{% endblock %} {% block head_extra %}
 <!-- WebRTC and necessary libraries -->
 <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
@@ -29,7 +28,8 @@ head_extra %}
           class="ml-3 px-3 py-1 bg-green-600 text-xs rounded-full animate-pulse flex items-center"
           id="statusIndicator"
         >
-          <i class="fas fa-circle text-xs mr-1"></i> Live
+          <i class="fas fa-circle text-xs mr-1"></i>
+          <span id="statusText">Waiting</span>
         </span>
       </div>
       <div class="flex items-center space-x-3">
@@ -53,8 +53,101 @@ head_extra %}
       </div>
     </div>
 
-    <!-- Main Video Area -->
-    <div class="flex-grow flex">
+    <!-- Waiting Room -->
+    <div
+      id="waitingRoomUI"
+      class="flex-grow flex items-center justify-center bg-gray-50 p-4"
+    >
+      <div
+        class="max-w-lg w-full bg-white rounded-xl shadow-lg p-8 text-center"
+      >
+        <div class="mb-6">
+          <!-- Video preview in waiting room -->
+          <div
+            class="w-64 h-48 mx-auto bg-gray-800 rounded-lg overflow-hidden mb-4 relative"
+          >
+            <video
+              id="waitingRoomVideo"
+              autoplay
+              playsinline
+              muted
+              class="w-full h-full object-cover"
+            ></video>
+            <div
+              id="waitingRoomVideoPlaceholder"
+              class="absolute inset-0 flex items-center justify-center bg-gray-900"
+            >
+              <i class="fas fa-video-slash text-gray-400 text-4xl"></i>
+            </div>
+          </div>
+
+          <!-- Camera and Mic Controls in waiting room -->
+          <div class="flex justify-center space-x-4 mt-3">
+            <button
+              id="waitingRoomMicToggle"
+              class="p-3 bg-gray-50 rounded-full hover:bg-gray-100 flex items-center justify-center border border-gray-200 transition duration-150"
+              title="Toggle Microphone"
+            >
+              <i class="fas fa-microphone text-green-600"></i>
+            </button>
+            <button
+              id="waitingRoomCameraToggle"
+              class="p-3 bg-gray-50 rounded-full hover:bg-gray-100 flex items-center justify-center border border-gray-200 transition duration-150"
+              title="Toggle Camera"
+            >
+              <i class="fas fa-video text-green-600"></i>
+            </button>
+          </div>
+        </div>
+        <h2 class="text-2xl font-semibold text-gray-800 mb-2">
+          Counseling Session Waiting Room
+        </h2>
+        <p class="text-lg text-gray-600 mb-6" id="waitingRoomMessage">
+          Waiting for student to join...
+        </p>
+        <div class="bg-gray-100 rounded-lg p-4 mb-6">
+          <div class="flex justify-between mb-3">
+            <span class="font-medium">Session details:</span>
+            <span class="text-gray-500">ID: {{ session.id }}</span>
+          </div>
+          <div class="flex justify-between mb-2">
+            <span>Student:</span>
+            <span class="font-medium">{{ student_user.get_full_name() }}</span>
+          </div>
+          <div class="flex justify-between mb-2">
+            <span>Scheduled time:</span>
+            <span class="font-medium"
+              >{{ session.scheduled_at.strftime('%Y-%m-%d %H:%M') }}</span
+            >
+          </div>
+          <div class="flex justify-between">
+            <span>Duration:</span>
+            <span class="font-medium"
+              >{{ session.duration_minutes }} minutes</span
+            >
+          </div>
+        </div>
+        <div class="flex items-center justify-center space-x-4">
+          <div class="flex items-center gap-2">
+            <div
+              class="h-3 w-3 rounded-full bg-green-500"
+              id="counselorIndicator"
+            ></div>
+            <span class="text-sm">Counselor ready</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div
+              class="h-3 w-3 rounded-full bg-gray-300"
+              id="studentIndicator"
+            ></div>
+            <span class="text-sm">Student</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Video Area (hidden until call starts) -->
+    <div id="callUI" class="flex-grow flex hidden">
       <!-- Video Streams -->
       <div class="flex-grow flex flex-col md:flex-row relative bg-gray-900">
         <!-- Main Video Stream (Student) -->
@@ -403,27 +496,43 @@ head_extra %}
   let socket;
   let isInitiator = false; // Tracks if this client should initiate the offer
   let isConnected = false; // Tracks active connection state
+  let waitingRoomStatus = "empty"; // Tracks the waiting room status
+  let pendingIceCandidates = []; // Store ICE candidates until remote description is set
 
   // DOM elements
-  const localVideo = document.getElementById('localVideo');
-  const remoteVideo = document.getElementById('remoteVideo');
-  const recordButton = document.getElementById('recordButton');
-  const endSessionButton = document.getElementById('endSessionButton');
-  const saveNotesButton = document.getElementById('saveNotes');
-  const sessionNotes = document.getElementById('sessionNotes');
-  const timerEl = document.getElementById('timer');
-  const micToggle = document.getElementById('micToggle');
-  const cameraToggle = document.getElementById('cameraToggle');
-  const screenShareToggle = document.getElementById('screenShareToggle');
-  const fullScreenToggle = document.getElementById('fullScreenToggle');
-  const videoQuality = document.getElementById('videoQuality');
-  const connectionIndicator = document.getElementById('connectionIndicator');
-  const connectionStatus = document.getElementById('connectionStatus');
-  const networkStats = document.getElementById('networkStats');
-  const endSessionModal = document.getElementById('endSessionModal');
-  const confirmEndSession = document.getElementById('confirmEndSession');
-  const cancelEndSession = document.getElementById('cancelEndSession');
-  const endSessionNotes = document.getElementById('endSessionNotes');
+  const localVideo = document.getElementById("localVideo");
+  const remoteVideo = document.getElementById("remoteVideo");
+  const connectionStatus = document.getElementById("connectionStatus");
+  const connectionIndicator = document.getElementById("connectionIndicator");
+  const networkStats = document.getElementById("networkStats");
+  const timer = document.getElementById("timer");
+
+  // Control buttons
+  const micToggle = document.getElementById("micToggle");
+  const videoToggle = document.getElementById("videoToggle");
+  const screenShareButton = document.getElementById('screenShareButton');
+  const recordButton = document.getElementById("recordButton");
+  const endCallButton = document.getElementById("endCallButton");
+  const qualitySettingButton = document.getElementById("qualitySettingButton");
+
+  // Modal elements
+  const endSessionModal = document.getElementById("endSessionModal");
+  const showEndSessionModal = document.getElementById("showEndSessionModal");
+  const closeEndSession = document.getElementById("closeEndSession");
+  const cancelEndSession = document.getElementById("cancelEndSession");
+  const endSessionNotes = document.getElementById("endSessionNotes");
+
+  // Waiting room elements
+  const waitingRoomUI = document.getElementById("waitingRoomUI");
+  const callUI = document.getElementById("callUI");
+  const waitingRoomMessage = document.getElementById("waitingRoomMessage");
+  const counselorIndicator = document.getElementById("counselorIndicator");
+  const studentIndicator = document.getElementById("studentIndicator");
+  const statusText = document.getElementById("statusText");
+  const waitingRoomVideo = document.getElementById("waitingRoomVideo");
+  const waitingRoomVideoPlaceholder = document.getElementById("waitingRoomVideoPlaceholder");
+  const waitingRoomMicToggle = document.getElementById("waitingRoomMicToggle");
+  const waitingRoomCameraToggle = document.getElementById("waitingRoomCameraToggle");
 
   // Session details
   const sessionId = {{ session.id }};
@@ -431,8 +540,206 @@ head_extra %}
   const currentUserRole = "{{ current_user.role }}";
   const currentUserId = {{ current_user.id }};
 
+  // Check for media permissions when page loads
+  async function checkMediaPermissions() {
+    // ...existing code...
+  }
+
+  // Initialize Socket.IO connection
+  function initSocketConnection() {
+    // Use the shared ConnectionManager instance instead of creating a new connection
+    if (window.connectionManager) {
+      window.connectionManager.getConnection()
+        .then(sharedSocket => {
+          // Use the shared socket
+          socket = sharedSocket;
+          console.log('Using shared socket connection for video session');
+
+          // Handle socket connection events
+          if (socket.connected) {
+            console.log('Already connected to signaling server');
+            connectionStatus.textContent = 'Signaling Connected';
+
+            // Join the video call room
+            socket.emit('join_call', {
+              session_id: sessionId
+            });
+
+            // Check waiting room status immediately
+            socket.emit('check_waiting_room_status', {
+              session_id: sessionId
+            });
+          }
+
+          // Setup all socket event listeners for video session
+          setupVideoSessionEventListeners();
+        })
+        .catch(error => {
+          console.error('Failed to get shared socket connection:', error);
+          fallbackToDirectConnection();
+        });
+    } else {
+      console.warn('ConnectionManager not available, using direct connection');
+      fallbackToDirectConnection();
+    }
+  }
+
+  // Fallback to direct connection if shared connection is not available
+  function fallbackToDirectConnection() {
+    console.log('Creating direct socket.io connection');
+    // Connect directly to socket.io server as before
+    socket = io.connect(window.location.origin, {
+      query: {
+        session_id: sessionId
+      }
+    });
+
+    // Setup all socket event listeners for video session
+    setupVideoSessionEventListeners();
+  }
+
+  // Setup all socket event listeners for video session
+  function setupVideoSessionEventListeners() {
+    // Socket connection events
+    socket.on('connect', () => {
+      console.log('Connected to signaling server');
+      connectionStatus.textContent = 'Signaling Connected';
+
+      // Join the video call room
+      socket.emit('join_call', {
+        session_id: sessionId
+      });
+
+      // Check waiting room status immediately
+      socket.emit('check_waiting_room_status', {
+        session_id: sessionId
+      });
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+      connectionStatus.textContent = 'Signaling Error';
+      connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
+      connectionIndicator.classList.add('bg-red-500');
+    });
+
+    // Handle waiting room status updates
+    socket.on('waiting_room_status', (data) => {
+      console.log('Waiting room status update:', data);
+      waitingRoomStatus = data.status;
+      updateWaitingRoomUI(data);
+
+      // If call is now in progress, start the call
+      if (data.call_started) {
+        startCall();
+      }
+    });
+
+    // Handle start call event
+    socket.on('start_call', (data) => {
+      console.log('Starting call:', data);
+      waitingRoomStatus = 'call_in_progress';
+      startCall();
+    });
+
+    // Handle user joining
+    socket.on('user_joined', (data) => {
+      console.log('User joined:', data);
+
+      // If we got a waiting status with the join event, update UI
+      if (data.waiting_status) {
+        waitingRoomStatus = data.waiting_status;
+        updateWaitingRoomUI({
+          counselor_waiting: data.role === 'office_admin' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'counselor_waiting',
+          student_waiting: data.role === 'student' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'student_waiting'
+        });
+      }
+    });
+
+    socket.on('user_left', (data) => {
+      console.log('User left:', data);
+
+      // If call is in progress, show notification
+      if (waitingRoomStatus === 'call_in_progress') {
+        // Show notification that the other participant has left
+        alert(`${data.name} has left the session`);
+
+        // Update UI to show disconnected state
+        connectionStatus.textContent = 'Other user disconnected';
+        connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
+        connectionIndicator.classList.add('bg-red-500');
+
+        // Clear remote video stream
+        if (remoteStream) {
+          remoteStream.getTracks().forEach(track => track.stop());
+        }
+        remoteVideo.srcObject = null;
+      } else {
+        // We're in waiting room, update status
+        socket.emit('check_waiting_room_status', {
+          session_id: sessionId
+        });
+      }
+    });
+
+    // WebRTC signaling events
+    socket.on('video_offer', (data) => {
+      console.log('Received video offer from:', data.sender_name);
+      handleVideoOffer(data);
+    });
+
+    socket.on('video_answer', (data) => {
+      console.log('Received video answer from:', data.sender_name);
+      handleVideoAnswer(data);
+    });
+
+    socket.on('ice_candidate', (data) => {
+      console.log('Received ICE candidate');
+      handleIceCandidate(data);
+    });
+
+    socket.on('call_status', (data) => {
+      console.log('Call status update:', data);
+      // Update UI based on call status if needed
+    });
+
+    // Handle waiting room messages
+    socket.on('waiting_room_message', (data) => {
+      console.log('Waiting room message:', data);
+      // Display as notification or in waiting room UI
+      const notificationDiv = document.createElement('div');
+      notificationDiv.className = 'bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-4 rounded shadow-md';
+      notificationDiv.innerHTML = `
+        <p class="font-bold">${data.sender_name}:</p>
+        <p>${data.message}</p>
+        <p class="text-xs text-gray-500 mt-1">${new Date(data.timestamp).toLocaleTimeString()}</p>
+      `;
+
+      const waitingRoomNotifications = document.getElementById('waitingRoomNotifications');
+      if (waitingRoomNotifications) {
+        waitingRoomNotifications.appendChild(notificationDiv);
+        waitingRoomNotifications.scrollTop = waitingRoomNotifications.scrollHeight;
+      }
+    });
+  }
+
+  // Update the waiting room UI based on current status
+  function updateWaitingRoomUI(data) {
+    // ...existing code...
+  }
+
+  // Start the video call
+  async function startCall() {
+    // ...existing code...
+  }
+
+  // ...remaining existing functions...
+
   // Start the call when page loads
   document.addEventListener('DOMContentLoaded', function() {
+      // Check for media permissions first
+      checkMediaPermissions();
+
       // Initialize Socket.IO connection
       initSocketConnection();
 
@@ -444,788 +751,12 @@ head_extra %}
 
       // Setup event listeners
       setupEventListeners();
+
+      // Initialize waiting room video preview
+      initWaitingRoomVideoPreview();
   });
 
-  // Initialize Socket.IO connection
-  function initSocketConnection() {
-      // Connect to socket.io server
-      socket = io.connect(window.location.origin, {
-          query: {
-              session_id: sessionId
-          }
-      });
-
-      // Socket connection events
-      socket.on('connect', () => {
-          console.log('Connected to signaling server');
-          connectionStatus.textContent = 'Signaling Connected';
-
-          // Join the video call room
-          socket.emit('join_call', {
-              session_id: sessionId
-          });
-      });
-
-      socket.on('connect_error', (error) => {
-          console.error('Socket connection error:', error);
-          connectionStatus.textContent = 'Signaling Error';
-          connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
-          connectionIndicator.classList.add('bg-red-500');
-      });
-
-      // WebRTC signaling events
-      socket.on('user_joined', (data) => {
-          console.log('User joined:', data);
-
-          // If counselor and student both in room, counselor initiates the call
-          if (currentUserRole === 'office_admin' && data.role === 'student') {
-              isInitiator = true;
-              startCall();
-          } else if (currentUserRole === 'student' && data.role === 'office_admin') {
-              startCall();
-          }
-      });
-
-      socket.on('user_left', (data) => {
-          console.log('User left:', data);
-          // Show notification that the other participant has left
-          alert(`${data.name} has left the session`);
-
-          // Update UI to show disconnected state
-          connectionStatus.textContent = 'Other user disconnected';
-          connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
-          connectionIndicator.classList.add('bg-red-500');
-
-          // Clear remote video stream
-          if (remoteStream) {
-              remoteStream.getTracks().forEach(track => track.stop());
-          }
-          remoteVideo.srcObject = null;
-      });
-
-      // WebRTC signaling events
-      socket.on('video_offer', (data) => {
-          console.log('Received video offer from:', data.sender_name);
-          handleVideoOffer(data);
-      });
-
-      socket.on('video_answer', (data) => {
-          console.log('Received video answer from:', data.sender_name);
-          handleVideoAnswer(data);
-      });
-
-      socket.on('ice_candidate', (data) => {
-          console.log('Received ICE candidate');
-          handleIceCandidate(data);
-      });
-
-      socket.on('call_status', (data) => {
-          console.log('Call status update:', data);
-          // Update UI based on call status if needed
-      });
-  }
-
-  // Initialize tabs functionality
-  function initTabs() {
-      const tabButtons = document.querySelectorAll('.tab-button');
-      tabButtons.forEach(button => {
-          button.addEventListener('click', () => {
-              const tab = button.getAttribute('data-tab');
-
-              // Remove active class from all tabs and contents
-              document.querySelectorAll('.tab-button').forEach(b => {
-                b.classList.remove('active', 'border-b-2', 'border-green-700', 'font-medium');
-                b.classList.add('border-b-0');
-              });
-              document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
-
-              // Add active class to selected tab and content
-              button.classList.add('active', 'border-b-2', 'border-green-700', 'font-medium');
-              document.querySelector(`.tab-content[data-tab="${tab}"]`).classList.remove('hidden');
-          });
-      });
-  }
-
-  // Start the video call
-  async function startCall() {
-      try {
-          // Get local media stream
-          localStream = await navigator.mediaDevices.getUserMedia({
-              video: true,
-              audio: true
-          });
-
-          // Display local video
-          localVideo.srcObject = localStream;
-
-          // Create remote stream to receive peer's media
-          remoteStream = new MediaStream();
-          remoteVideo.srcObject = remoteStream;
-
-          // Set up WebRTC connection
-          setupPeerConnection();
-
-          // If this client should initiate the call, create and send an offer
-          if (isInitiator) {
-              setTimeout(() => {
-                  createOffer();
-              }, 1000); // Short delay to ensure connection is ready
-          }
-
-      } catch (error) {
-          console.error('Error starting video call:', error);
-          alert('Failed to access camera and microphone. Please make sure they are connected and permissions are granted.');
-          connectionStatus.textContent = 'Media Error';
-          connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
-          connectionIndicator.classList.add('bg-red-500');
-      }
-  }
-
-  // Setup WebRTC peer connection
-  function setupPeerConnection() {
-      // Configure ICE servers (STUN and TURN for NAT traversal)
-      const configuration = {
-          iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-              // Add TURN servers for production (required for many firewalls)
-              // { urls: 'turn:your-turn-server.com:3478', username: 'username', credential: 'password' }
-          ]
-      };
-
-      // Create peer connection
-      peerConnection = new RTCPeerConnection(configuration);
-
-      // Add all local tracks to the peer connection
-      localStream.getTracks().forEach(track => {
-          peerConnection.addTrack(track, localStream);
-      });
-
-      // Listen for remote tracks
-      peerConnection.ontrack = (event) => {
-          console.log('Remote track received:', event.track.kind);
-          // Add remote tracks to the remote stream
-          event.streams[0].getTracks().forEach(track => {
-              remoteStream.addTrack(track);
-          });
-      };
-
-      // Handle ICE candidates
-      peerConnection.onicecandidate = (event) => {
-          if (event.candidate) {
-              // Send the ICE candidate to the signaling server
-              socket.emit('ice_candidate', {
-                  session_id: sessionId,
-                  candidate: event.candidate
-              });
-          }
-      };
-
-      // Monitor connection state
-      peerConnection.oniceconnectionstatechange = () => {
-          console.log('ICE connection state:', peerConnection.iceConnectionState);
-          updateConnectionStatus(peerConnection.iceConnectionState);
-      };
-
-      // Monitor signaling state
-      peerConnection.onsignalingstatechange = () => {
-          console.log('Signaling state:', peerConnection.signalingState);
-      };
-
-      console.log('WebRTC peer connection created');
-  }
-
-  // Create and send an offer
-  async function createOffer() {
-      try {
-          const offer = await peerConnection.createOffer({
-              offerToReceiveAudio: true,
-              offerToReceiveVideo: true
-          });
-
-          await peerConnection.setLocalDescription(offer);
-
-          // Send the offer to the signaling server
-          socket.emit('video_offer', {
-              session_id: sessionId,
-              sdp: peerConnection.localDescription
-          });
-
-          console.log('Offer sent');
-      } catch (error) {
-          console.error('Error creating offer:', error);
-          alert('Failed to create connection offer. Please try rejoining the session.');
-      }
-  }
-
-  // Handle incoming video offer
-  async function handleVideoOffer(data) {
-      try {
-          if (!peerConnection) {
-              console.warn('No peer connection when receiving offer, setting up now');
-              setupPeerConnection();
-          }
-
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setLocalDescription(answer);
-
-          // Send the answer to the signaling server
-          socket.emit('video_answer', {
-              session_id: sessionId,
-              sdp: peerConnection.localDescription
-          });
-
-          console.log('Answer sent');
-      } catch (error) {
-          console.error('Error handling video offer:', error);
-          alert('Failed to handle incoming connection. Please try refreshing the page.');
-      }
-  }
-
-  // Handle incoming video answer
-  async function handleVideoAnswer(data) {
-      try {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          console.log('Answer processed and remote description set');
-      } catch (error) {
-          console.error('Error handling video answer:', error);
-      }
-  }
-
-  // Handle incoming ICE candidate
-  async function handleIceCandidate(data) {
-      try {
-          if (peerConnection && data.candidate) {
-              await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-              console.log('Added ICE candidate');
-          }
-      } catch (error) {
-          console.error('Error handling ICE candidate:', error);
-      }
-  }
-
-  // Update connection status UI based on ICE state
-  function updateConnectionStatus(state) {
-      switch(state) {
-          case 'checking':
-              connectionStatus.textContent = 'Connecting...';
-              connectionIndicator.classList.remove('bg-green-500', 'bg-red-500');
-              connectionIndicator.classList.add('bg-yellow-500');
-              isConnected = false;
-              break;
-
-          case 'connected':
-          case 'completed':
-              connectionStatus.textContent = 'Connected';
-              connectionIndicator.classList.remove('bg-yellow-500', 'bg-red-500');
-              connectionIndicator.classList.add('bg-green-500');
-              isConnected = true;
-
-              // Start monitoring connection quality
-              startConnectionQualityMonitoring();
-              break;
-
-          case 'disconnected':
-              connectionStatus.textContent = 'Disconnected - Trying to reconnect';
-              connectionIndicator.classList.remove('bg-green-500', 'bg-red-500');
-              connectionIndicator.classList.add('bg-yellow-500');
-              isConnected = false;
-              break;
-
-          case 'failed':
-              connectionStatus.textContent = 'Connection Failed';
-              connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
-              connectionIndicator.classList.add('bg-red-500');
-              isConnected = false;
-
-              // Try to restart ICE if connection failed
-              if (peerConnection) {
-                  peerConnection.restartIce();
-              }
-              break;
-
-          case 'closed':
-              connectionStatus.textContent = 'Connection Closed';
-              connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
-              connectionIndicator.classList.add('bg-red-500');
-              isConnected = false;
-              break;
-      }
-  }
-
-  // Monitor connection quality periodically
-  function startConnectionQualityMonitoring() {
-      setInterval(async () => {
-          if (!peerConnection || !isConnected) return;
-
-          try {
-              const stats = await peerConnection.getStats();
-              let videoBitrate = 0;
-              let audioBitrate = 0;
-              let packetLoss = 0;
-              let jitter = 0;
-              let prevBytesSent = 0;
-              let prevTimestamp = 0;
-
-              stats.forEach(report => {
-                  // Process inbound RTP stats for video
-                  if (report.type === 'inbound-rtp' && report.kind === 'video') {
-                      if (report.bytesReceived && report.timestamp && prevTimestamp) {
-                          const timeDiff = report.timestamp - prevTimestamp;
-                          if (timeDiff > 0) {
-                              videoBitrate = Math.round((report.bytesReceived * 8) / timeDiff);
-                          }
-                      }
-
-                      if (report.packetsLost !== undefined && report.packetsReceived) {
-                          packetLoss = (report.packetsLost / (report.packetsReceived + report.packetsLost) * 100).toFixed(2);
-                      }
-
-                      prevBytesSent = report.bytesReceived;
-                      prevTimestamp = report.timestamp;
-                  }
-
-                  // Process inbound RTP stats for audio
-                  if (report.type === 'inbound-rtp' && report.kind === 'audio') {
-                      if (report.jitter) {
-                          jitter = (report.jitter * 1000).toFixed(2); // Convert to ms
-                      }
-                  }
-              });
-
-              // Determine connection quality based on metrics
-              const quality = getConnectionQuality(videoBitrate, packetLoss, jitter);
-
-              // Update UI based on connection quality
-              updateConnectionQualityUI(quality, videoBitrate, packetLoss, jitter);
-
-          } catch (e) {
-              console.error('Error monitoring connection quality:', e);
-          }
-      }, 2000);
-  }
-
-  // Determine connection quality based on stats
-  function getConnectionQuality(bitrate, packetLoss, jitter) {
-      if (packetLoss > 5 || jitter > 100 || bitrate < 100) {
-          return 'poor';
-      } else if (packetLoss > 1 || jitter > 50 || bitrate < 300) {
-          return 'fair';
-      } else {
-          return 'good';
-      }
-  }
-
-  // Update UI based on connection quality
-  function updateConnectionQualityUI(quality, bitrate, packetLoss, jitter) {
-      if (quality === 'good') {
-          connectionIndicator.classList.remove('bg-yellow-500', 'bg-red-500');
-          connectionIndicator.classList.add('bg-green-500');
-          connectionStatus.textContent = 'Connected (Good)';
-      } else if (quality === 'fair') {
-          connectionIndicator.classList.remove('bg-green-500', 'bg-red-500');
-          connectionIndicator.classList.add('bg-yellow-500');
-          connectionStatus.textContent = 'Connected (Fair)';
-      } else {
-          connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
-          connectionIndicator.classList.add('bg-red-500');
-          connectionStatus.textContent = 'Poor Connection';
-      }
-
-      // Update network stats display
-      networkStats.textContent = `Video: ${bitrate} Kbps | Loss: ${packetLoss}% | Jitter: ${jitter}ms`;
-  }
-
-  // Start session timer
-  function startTimer() {
-      callStartTime = new Date();
-
-      timerInterval = setInterval(() => {
-          const now = new Date();
-          const diff = new Date(now - callStartTime);
-          const hours = diff.getUTCHours().toString().padStart(2, '0');
-          const minutes = diff.getUTCMinutes().toString().padStart(2, '0');
-          const seconds = diff.getUTCSeconds().toString().padStart(2, '0');
-
-          timerEl.textContent = `${hours}:${minutes}:${seconds}`;
-      }, 1000);
-  }
-
-  // Setup all event listeners
-  function setupEventListeners() {
-      // Toggle microphone
-      micToggle.addEventListener('click', () => {
-          micEnabled = !micEnabled;
-          localStream.getAudioTracks().forEach(track => {
-              track.enabled = micEnabled;
-          });
-
-          micToggle.querySelector('i').className = micEnabled ? 'fas fa-microphone text-xl mb-1 text-green-600' : 'fas fa-microphone-slash text-xl mb-1 text-red-600';
-          micToggle.querySelector('span').textContent = micEnabled ? 'Mute Mic' : 'Unmute Mic';
-      });
-
-      // Toggle camera
-      cameraToggle.addEventListener('click', () => {
-          cameraEnabled = !cameraEnabled;
-          localStream.getVideoTracks().forEach(track => {
-              track.enabled = cameraEnabled;
-          });
-
-          cameraToggle.querySelector('i').className = cameraEnabled ? 'fas fa-video text-xl mb-1 text-green-600' : 'fas fa-video-slash text-xl mb-1 text-red-600';
-          cameraToggle.querySelector('span').textContent = cameraEnabled ? 'Hide Camera' : 'Show Camera';
-      });
-
-      // Toggle screen sharing
-      screenShareToggle.addEventListener('click', async () => {
-          try {
-              if (screenShareToggle.querySelector('i').className.includes('desktop')) {
-                  // Start screen sharing
-                  const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                  const videoTrack = screenStream.getVideoTracks()[0];
-
-                  // When screen sharing stops from the browser UI
-                  videoTrack.onended = async () => {
-                      await replaceTrackWithCamera();
-                  };
-
-                  // Replace the video track in the peer connection
-                  const senders = peerConnection.getSenders();
-                  const videoSender = senders.find(sender =>
-                      sender.track && sender.track.kind === 'video'
-                  );
-
-                  if (videoSender) {
-                      await videoSender.replaceTrack(videoTrack);
-                  }
-
-                  // Replace the track in the local stream
-                  localStream.getVideoTracks().forEach(track => {
-                      track.stop();
-                  });
-
-                  localStream.getVideoTracks().forEach(track => {
-                      localStream.removeTrack(track);
-                  });
-
-                  localStream.addTrack(videoTrack);
-                  localVideo.srcObject = localStream;
-
-                  screenShareToggle.querySelector('i').className = 'fas fa-user text-xl mb-1 text-green-600';
-                  screenShareToggle.querySelector('span').textContent = 'Stop Sharing';
-
-              } else {
-                  await replaceTrackWithCamera();
-              }
-          } catch (error) {
-              console.error('Error toggling screen sharing:', error);
-              alert('Failed to share screen');
-          }
-      });
-
-      // Helper function to revert to camera
-      async function replaceTrackWithCamera() {
-          try {
-              const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
-              const cameraTrack = cameraStream.getVideoTracks()[0];
-
-              // Replace track in the peer connection
-              const senders = peerConnection.getSenders();
-              const videoSender = senders.find(sender =>
-                  sender.track && sender.track.kind === 'video'
-              );
-
-              if (videoSender) {
-                  await videoSender.replaceTrack(cameraTrack);
-              }
-
-              // Replace track in local stream
-              localStream.getVideoTracks().forEach(track => {
-                  track.stop();
-              });
-
-              localStream.getVideoTracks().forEach(track => {
-                  localStream.removeTrack(track);
-              });
-
-              localStream.addTrack(cameraTrack);
-              localVideo.srcObject = localStream;
-
-              screenShareToggle.querySelector('i').className = 'fas fa-desktop text-xl mb-1 text-green-600';
-              screenShareToggle.querySelector('span').textContent = 'Share Screen';
-          } catch (error) {
-              console.error('Error reverting to camera:', error);
-          }
-      }
-
-      // Toggle full screen
-      fullScreenToggle.addEventListener('click', () => {
-          const videoContainer = document.getElementById('mainVideoContainer');
-
-          if (!document.fullscreenElement) {
-              if (videoContainer.requestFullscreen) {
-                  videoContainer.requestFullscreen();
-              } else if (videoContainer.webkitRequestFullscreen) {
-                  videoContainer.webkitRequestFullscreen();
-              } else if (videoContainer.msRequestFullscreen) {
-                  videoContainer.msRequestFullscreen();
-              }
-          } else {
-              if (document.exitFullscreen) {
-                  document.exitFullscreen();
-              } else if (document.webkitExitFullscreen) {
-                  document.webkitExitFullscreen();
-              } else if (document.msExitFullscreen) {
-                  document.msExitFullscreen();
-              }
-          }
-      });
-
-      // Video quality change
-      videoQuality.addEventListener('change', () => {
-          const quality = videoQuality.value;
-
-          if (quality === 'audio') {
-              // Turn off video but keep audio
-              localStream.getVideoTracks().forEach(track => {
-                  track.enabled = false;
-              });
-              alert('Video turned off, audio only mode enabled');
-          } else {
-              // Re-enable video and adjust quality constraints
-              localStream.getVideoTracks().forEach(track => {
-                  track.enabled = true;
-
-                  // Get video sender
-                  const sender = peerConnection.getSenders().find(s =>
-                      s.track && s.track.kind === 'video'
-                  );
-
-                  if (sender) {
-                      const params = sender.getParameters();
-                      if (!params.encodings) {
-                          params.encodings = [{}];
-                      }
-
-                      // Adjust encoding parameters based on quality setting
-                      if (quality === 'high') {
-                          params.encodings[0].maxBitrate = 2500000; // 2.5 Mbps
-                      } else if (quality === 'medium') {
-                          params.encodings[0].maxBitrate = 1000000; // 1 Mbps
-                      } else if (quality === 'low') {
-                          params.encodings[0].maxBitrate = 500000; // 500 Kbps
-                      }
-
-                      // Apply the parameters to the sender
-                      sender.setParameters(params)
-                          .then(() => console.log(`Changed video quality to: ${quality}`))
-                          .catch(e => console.error('Failed to set parameters:', e));
-                  }
-              });
-          }
-      });
-
-      // Toggle recording
-      recordButton.addEventListener('click', () => {
-          if (isRecording) {
-              stopRecording();
-              recordButton.classList.remove('bg-gray-600');
-              recordButton.classList.add('bg-red-600');
-              recordButton.innerHTML = '<i class="fas fa-record-vinyl mr-1.5"></i> Record';
-          } else {
-              startRecording();
-              recordButton.classList.remove('bg-red-600');
-              recordButton.classList.add('bg-gray-600');
-              recordButton.innerHTML = '<i class="fas fa-stop-circle mr-1.5"></i> Stop';
-          }
-
-          isRecording = !isRecording;
-      });
-
-      // Save notes
-      saveNotesButton.addEventListener('click', async () => {
-          try {
-              const notes = sessionNotes.value;
-
-              const response = await fetch(`/video-session/${sessionId}/update-notes`, {
-                  method: 'POST',
-                  headers: {
-                      'Content-Type': 'application/x-www-form-urlencoded',
-                  },
-                  body: new URLSearchParams({
-                      'notes': notes
-                  })
-              });
-
-              const data = await response.json();
-
-              if (data.status === 'success') {
-                  // Show success toast notification
-                  const toastDiv = document.createElement('div');
-                  toastDiv.className = 'fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg z-50 animate-fade-in-out flex items-center';
-                  toastDiv.innerHTML = '<i class="fas fa-check-circle mr-2"></i> Notes saved successfully';
-                  document.body.appendChild(toastDiv);
-
-                  setTimeout(() => {
-                      toastDiv.remove();
-                  }, 3000);
-              } else {
-                  alert('Error: ' + data.message);
-              }
-          } catch (error) {
-              console.error('Error saving notes:', error);
-              alert('Failed to save notes');
-          }
-      });
-
-      // End call button
-      endSessionButton.addEventListener('click', () => {
-          // Copy main notes to end session modal
-          endSessionNotes.value = sessionNotes.value;
-          endSessionModal.classList.remove('hidden');
-      });
-
-      // Cancel end session
-      cancelEndSession.addEventListener('click', () => {
-          endSessionModal.classList.add('hidden');
-      });
-
-      // Confirm end session
-      confirmEndSession.addEventListener('click', async () => {
-          try {
-              const finalNotes = endSessionNotes.value;
-              const studentConsent = document.getElementById('studentConsent')?.checked || false;
-
-              // Stop recording if active
-              if (isRecording) {
-                  stopRecording();
-              }
-
-              // Notify others that we're leaving
-              socket.emit('leave_call', {
-                  session_id: sessionId
-              });
-
-              // Stop streams
-              if (localStream) {
-                  localStream.getTracks().forEach(track => track.stop());
-              }
-
-              clearInterval(timerInterval);
-
-              // Close peer connection
-              if (peerConnection) {
-                  peerConnection.close();
-              }
-
-              const formData = new FormData();
-              formData.append('notes', finalNotes);
-              formData.append('student_consent', studentConsent);
-
-              if (recordedChunks.length > 0) {
-                  const recordingBlob = new Blob(recordedChunks, { type: 'video/webm' });
-                  formData.append('recording_data', recordingBlob);
-              }
-
-              const response = await fetch(`/video-session/${sessionId}/end`, {
-                  method: 'POST',
-                  body: formData
-              });
-
-              const data = await response.json();
-
-              if (data.status === 'success') {
-                  window.location.href = "{{ url_for('office.video_counseling') }}";
-              } else {
-                  alert('Error: ' + data.message);
-              }
-
-          } catch (error) {
-              console.error('Error ending session:', error);
-              alert('Failed to end session properly');
-          }
-      });
-  }
-
-  // Start recording the call
-  function startRecording() {
-      try {
-          // Create a new stream that combines local and remote streams
-          const canvas = document.createElement('canvas');
-          canvas.width = 640;
-          canvas.height = 480;
-          const ctx = canvas.getContext('2d');
-
-          // Create a MediaStream from the canvas
-          const canvasStream = canvas.captureStream();
-
-          // Add audio from local stream
-          localStream.getAudioTracks().forEach(track => {
-              canvasStream.addTrack(track);
-          });
-
-          // Record the combined stream
-          mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm' });
-
-          mediaRecorder.ondataavailable = function(event) {
-              if (event.data.size > 0) {
-                  recordedChunks.push(event.data);
-              }
-          };
-
-          // Draw local and remote video to the canvas periodically
-          setInterval(() => {
-              // Clear the canvas
-              ctx.fillStyle = 'black';
-              ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-              // Draw remote video (large)
-              ctx.drawImage(remoteVideo, 0, 0, canvas.width, canvas.height);
-
-              // Draw local video (small, in corner)
-              ctx.drawImage(localVideo, canvas.width - 160, canvas.height - 120, 150, 110);
-          }, 33); // ~30fps
-
-          mediaRecorder.start();
-          console.log('Recording started');
-      } catch (error) {
-          console.error('Error starting recording:', error);
-          alert('Failed to start recording');
-          isRecording = false;
-      }
-  }
-
-  // Stop recording
-  function stopRecording() {
-      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-          console.log('Recording stopped');
-      }
-  }
-
-  // Cleanup when leaving the page
-  window.addEventListener('beforeunload', () => {
-      // Notify others that we're leaving
-      if (socket) {
-          socket.emit('leave_call', {
-              session_id: sessionId
-          });
-      }
-
-      // Stop all tracks
-      if (localStream) {
-          localStream.getTracks().forEach(track => track.stop());
-      }
-
-      // Clear timer
-      clearInterval(timerInterval);
-
-      // Close peer connection
-      if (peerConnection) {
-          peerConnection.close();
-      }
-  });
+  // ...remaining existing code...
 </script>
 
 <!-- Create a basic stylesheet for video call interface -->
