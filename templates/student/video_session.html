@@ -1,0 +1,1367 @@
+{% extends "student/student_base.html" %} {% block title %}Video Session |
+KapiyuGuide{% endblock %} {% block head_extra %}
+<!-- WebRTC and necessary libraries -->
+<script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<!-- Include counseling socket files -->
+<script src="{{ url_for('static', filename='js/counseling-base.js') }}"></script>
+<script src="{{ url_for('static', filename='js/counseling-sockets.js') }}"></script>
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='css/video-call.css') }}"
+/>
+{% endblock %} {% block content %}
+<div class="bg-white rounded-lg shadow-md mb-6">
+  <div class="flex flex-col h-screen max-h-[calc(100vh-12rem)]">
+    <!-- Header -->
+    <div
+      class="bg-gradient-to-r from-blue-700 to-blue-800 text-white p-4 flex justify-between items-center rounded-t-lg"
+    >
+      <div class="flex items-center">
+        <a
+          href="{{ url_for('student.view_session', session_id=session.id) }}"
+          class="text-white hover:text-blue-200 mr-4 transition duration-150"
+        >
+          <i class="fas fa-arrow-left mr-2"></i> Back to Session Details
+        </a>
+        <h1 class="text-xl font-semibold">Counseling Session</h1>
+        <span
+          class="ml-3 px-3 py-1 bg-blue-600 text-xs rounded-full animate-pulse flex items-center"
+          id="statusIndicator"
+        >
+          <i class="fas fa-circle text-xs mr-1"></i>
+          <span id="statusText">Waiting</span>
+        </span>
+      </div>
+      <div class="flex items-center space-x-3">
+        <span
+          id="timer"
+          class="text-white text-lg font-mono px-3 py-1 bg-black bg-opacity-20 rounded-md"
+          >00:00:00</span
+        >
+        <button
+          id="endSessionButton"
+          class="flex items-center px-3 py-1.5 bg-red-700 rounded-md hover:bg-red-800 transition duration-150 text-sm font-medium"
+        >
+          <i class="fas fa-phone-slash mr-1.5"></i> End Session
+        </button>
+      </div>
+    </div>
+
+    <!-- Waiting Room -->
+    <div
+      id="waitingRoomUI"
+      class="flex-grow flex items-center justify-center bg-gray-50 p-4"
+    >
+      <div
+        class="max-w-lg w-full bg-white rounded-xl shadow-lg p-8 text-center"
+      >
+        <div class="mb-6">
+          <!-- Video preview in waiting room -->
+          <div
+            class="w-64 h-48 mx-auto bg-gray-800 rounded-lg overflow-hidden mb-4 relative"
+          >
+            <video
+              id="waitingRoomVideo"
+              autoplay
+              playsinline
+              muted
+              class="w-full h-full object-cover"
+            ></video>
+            <div
+              id="waitingRoomVideoPlaceholder"
+              class="absolute inset-0 flex items-center justify-center bg-gray-900"
+            >
+              <i class="fas fa-video-slash text-gray-400 text-4xl"></i>
+            </div>
+          </div>
+
+          <!-- Camera and Mic Controls in waiting room -->
+          <div class="flex justify-center space-x-4 mt-3">
+            <button
+              id="waitingRoomMicToggle"
+              class="p-3 bg-gray-50 rounded-full hover:bg-gray-100 flex items-center justify-center border border-gray-200 transition duration-150"
+              title="Toggle Microphone"
+            >
+              <i class="fas fa-microphone text-blue-600"></i>
+            </button>
+            <button
+              id="waitingRoomCameraToggle"
+              class="p-3 bg-gray-50 rounded-full hover:bg-gray-100 flex items-center justify-center border border-gray-200 transition duration-150"
+              title="Toggle Camera"
+            >
+              <i class="fas fa-video text-blue-600"></i>
+            </button>
+          </div>
+        </div>
+        <h2 class="text-2xl font-semibold text-gray-800 mb-2">
+          Counseling Session Waiting Room
+        </h2>
+        <p class="text-lg text-gray-600 mb-6" id="waitingRoomMessage">
+          Waiting for the counselor to join...
+        </p>
+        <div class="bg-gray-100 rounded-lg p-4 mb-6">
+          <div class="flex justify-between mb-3">
+            <span class="font-medium">Session details:</span>
+            <span class="text-gray-500">ID: {{ session.id }}</span>
+          </div>
+          <div class="flex justify-between mb-2">
+            <span>Counselor:</span>
+            <span class="font-medium"
+              >{{ counselor.get_full_name() if counselor else 'Not assigned yet'
+              }}</span
+            >
+          </div>
+          <div class="flex justify-between mb-2">
+            <span>Scheduled time:</span>
+            <span class="font-medium"
+              >{{ session.scheduled_at.strftime('%Y-%m-%d %H:%M') }}</span
+            >
+          </div>
+          <div class="flex justify-between">
+            <span>Duration:</span>
+            <span class="font-medium"
+              >{{ session.duration_minutes }} minutes</span
+            >
+          </div>
+        </div>
+        <div class="flex items-center justify-center space-x-4">
+          <div class="flex items-center gap-2">
+            <div
+              class="h-3 w-3 rounded-full bg-gray-300"
+              id="counselorIndicator"
+            ></div>
+            <span class="text-sm">Counselor</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div
+              class="h-3 w-3 rounded-full bg-green-500"
+              id="studentIndicator"
+            ></div>
+            <span class="text-sm">You (ready)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Video Area (hidden until call starts) -->
+    <div id="callUI" class="flex-grow flex hidden">
+      <!-- Video Streams -->
+      <div class="flex-grow flex flex-col md:flex-row relative bg-gray-900">
+        <!-- Main Video Stream (Counselor) -->
+        <div class="flex-grow relative" id="mainVideoContainer">
+          <video
+            id="remoteVideo"
+            autoplay
+            playsinline
+            class="w-full h-full object-cover"
+          ></video>
+          <div
+            class="absolute top-4 left-4 bg-black bg-opacity-60 px-3 py-1.5 rounded-md text-sm flex items-center"
+          >
+            <i class="fas fa-user mr-2 text-blue-400"></i>
+            <span class="text-white"
+              >{{ counselor.get_full_name() if counselor else 'Counselor'
+              }}</span
+            >
+          </div>
+        </div>
+
+        <!-- Self Video (Student) -->
+        <div
+          class="absolute bottom-4 right-4 w-64 h-48 md:w-1/4 md:h-1/4 bg-gray-800 rounded-lg overflow-hidden shadow-lg border-2 border-blue-700"
+          id="selfVideoContainer"
+        >
+          <video
+            id="localVideo"
+            autoplay
+            playsinline
+            muted
+            class="w-full h-full object-cover"
+          ></video>
+          <div
+            class="absolute top-2 right-2 bg-black bg-opacity-60 px-2 py-1 rounded-md text-xs flex items-center"
+          >
+            <span class="text-white"
+              >You ({{ current_user.get_full_name() }})</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <!-- Side Panel -->
+      <div class="w-80 bg-white border-l border-gray-200 flex flex-col">
+        <!-- Tabs -->
+        <div class="flex border-b border-gray-200">
+          <button
+            class="flex-1 py-3 text-center text-gray-600 hover:text-blue-700 tab-button active border-b-2 border-blue-700 font-medium"
+            data-tab="info"
+          >
+            <i class="fas fa-info-circle mr-2"></i> Info
+          </button>
+          <button
+            class="flex-1 py-3 text-center text-gray-600 hover:text-blue-700 tab-button"
+            data-tab="controls"
+          >
+            <i class="fas fa-sliders-h mr-2"></i> Controls
+          </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="flex-grow overflow-y-auto">
+          <!-- Info Tab -->
+          <div class="tab-content active" data-tab="info">
+            <div class="p-4">
+              <h3 class="text-lg font-semibold text-gray-800 mb-2">
+                Session Information
+              </h3>
+              <div
+                class="bg-gray-50 rounded-md p-4 space-y-3 border border-gray-200"
+              >
+                <div>
+                  <span class="text-gray-500 block text-sm">Session ID:</span>
+                  <span class="font-medium">{{ session.id }}</span>
+                </div>
+                <div>
+                  <span class="text-gray-500 block text-sm">Office:</span>
+                  <span class="font-medium">{{ session.office.name }}</span>
+                </div>
+                <div>
+                  <span class="text-gray-500 block text-sm">Counselor:</span>
+                  <span class="font-medium"
+                    >{{ counselor.get_full_name() if counselor else 'Not
+                    assigned yet' }}</span
+                  >
+                </div>
+                <div>
+                  <span class="text-gray-500 block text-sm"
+                    >Scheduled Time:</span
+                  >
+                  <span class="font-medium"
+                    >{{ session.scheduled_at.strftime('%Y-%m-%d %H:%M') }}</span
+                  >
+                </div>
+                <div>
+                  <span class="text-gray-500 block text-sm">Duration:</span>
+                  <span class="font-medium"
+                    >{{ session.duration_minutes }} minutes</span
+                  >
+                </div>
+              </div>
+
+              <div class="mt-6">
+                <h3 class="text-md font-semibold text-gray-800 mb-2">
+                  About Video Counseling
+                </h3>
+                <div
+                  class="bg-gray-50 rounded-md p-4 space-y-2 border border-gray-200 text-sm text-gray-700"
+                >
+                  <p>This video session is confidential and secure.</p>
+                  <p>
+                    Please ensure you're in a private space where you can speak
+                    freely.
+                  </p>
+                  <p>
+                    If you experience technical issues during the call, try
+                    refreshing the page.
+                  </p>
+                  <p>
+                    You can request a recording of this session after it's
+                    completed by contacting the office.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Controls Tab -->
+          <div class="tab-content hidden" data-tab="controls">
+            <div class="p-4">
+              <h3 class="text-lg font-semibold text-gray-800 mb-2">
+                Call Controls
+              </h3>
+              <div class="grid grid-cols-2 gap-3">
+                <button
+                  id="micToggle"
+                  class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 flex flex-col items-center justify-center border border-gray-200 transition duration-150"
+                >
+                  <i class="fas fa-microphone text-xl mb-1 text-blue-600"></i>
+                  <span class="text-xs">Mute Mic</span>
+                </button>
+                <button
+                  id="cameraToggle"
+                  class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 flex flex-col items-center justify-center border border-gray-200 transition duration-150"
+                >
+                  <i class="fas fa-video text-xl mb-1 text-blue-600"></i>
+                  <span class="text-xs">Hide Camera</span>
+                </button>
+                <button
+                  id="screenShareToggle"
+                  class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 flex flex-col items-center justify-center border border-gray-200 transition duration-150"
+                >
+                  <i class="fas fa-desktop text-xl mb-1 text-blue-600"></i>
+                  <span class="text-xs">Share Screen</span>
+                </button>
+                <button
+                  id="fullScreenToggle"
+                  class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 flex flex-col items-center justify-center border border-gray-200 transition duration-150"
+                >
+                  <i class="fas fa-expand text-xl mb-1 text-blue-600"></i>
+                  <span class="text-xs">Full Screen</span>
+                </button>
+              </div>
+
+              <div class="mt-6">
+                <h4 class="text-md font-semibold text-gray-800 mb-2">
+                  Video Quality
+                </h4>
+                <select
+                  id="videoQuality"
+                  class="w-full bg-gray-50 border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="high">High Quality</option>
+                  <option value="medium" selected>Medium Quality</option>
+                  <option value="low">Low Quality (save bandwidth)</option>
+                  <option value="audio">Audio Only</option>
+                </select>
+              </div>
+
+              <div class="mt-6">
+                <h4 class="text-md font-semibold text-gray-800 mb-2">
+                  Connection Status
+                </h4>
+                <div class="bg-gray-50 rounded-md p-3 border border-gray-200">
+                  <div class="flex items-center mb-2">
+                    <div
+                      class="w-3 h-3 bg-blue-500 rounded-full mr-2"
+                      id="connectionIndicator"
+                    ></div>
+                    <span id="connectionStatus" class="font-medium"
+                      >Connected</span
+                    >
+                  </div>
+                  <div class="text-xs text-gray-500">
+                    <span id="networkStats">Network Speed: Calculating...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- End Session Modal -->
+<div
+  id="endSessionModal"
+  class="fixed inset-0 z-50 hidden overflow-y-auto bg-gray-900 bg-opacity-75"
+>
+  <div
+    class="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0"
+  >
+    <span
+      class="hidden sm:inline-block sm:align-middle sm:h-screen"
+      aria-hidden="true"
+      >&#8203;</span
+    >
+    <div
+      class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full"
+    >
+      <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+        <div class="sm:flex sm:items-start">
+          <div
+            class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10"
+          >
+            <i class="fas fa-phone-slash text-red-600"></i>
+          </div>
+          <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+            <h3
+              class="text-lg leading-6 font-medium text-gray-900"
+              id="modal-title"
+            >
+              End Counseling Session
+            </h3>
+            <div class="mt-2">
+              <p class="text-sm text-gray-500">
+                Are you sure you want to leave this counseling session? This
+                will disconnect you from the video call.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+        <button
+          type="button"
+          id="confirmEndSession"
+          class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
+        >
+          Leave Session
+        </button>
+        <button
+          type="button"
+          id="cancelEndSession"
+          class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  // Global variables
+  let peerConnection;
+  let localStream;
+  let remoteStream;
+  let callStartTime;
+  let timerInterval;
+  let micEnabled = true;
+  let cameraEnabled = true;
+  let socket;
+  let isConnected = false; // Tracks active connection state
+  let waitingRoomStatus = "empty"; // Tracks the waiting room status
+
+  // DOM elements
+  const localVideo = document.getElementById('localVideo');
+  const remoteVideo = document.getElementById('remoteVideo');
+  const endSessionButton = document.getElementById('endSessionButton');
+  const timerEl = document.getElementById('timer');
+  const micToggle = document.getElementById('micToggle');
+  const cameraToggle = document.getElementById('cameraToggle');
+  const screenShareToggle = document.getElementById('screenShareToggle');
+  const fullScreenToggle = document.getElementById('fullScreenToggle');
+  const videoQuality = document.getElementById('videoQuality');
+  const connectionIndicator = document.getElementById('connectionIndicator');
+  const connectionStatus = document.getElementById('connectionStatus');
+  const networkStats = document.getElementById('networkStats');
+  const endSessionModal = document.getElementById('endSessionModal');
+  const confirmEndSession = document.getElementById('confirmEndSession');
+  const cancelEndSession = document.getElementById('cancelEndSession');
+
+  // Waiting room elements
+  const waitingRoomUI = document.getElementById('waitingRoomUI');
+  const callUI = document.getElementById('callUI');
+  const waitingRoomMessage = document.getElementById('waitingRoomMessage');
+  const counselorIndicator = document.getElementById('counselorIndicator');
+  const studentIndicator = document.getElementById('studentIndicator');
+  const statusText = document.getElementById('statusText');
+  const waitingRoomVideo = document.getElementById('waitingRoomVideo');
+  const waitingRoomVideoPlaceholder = document.getElementById('waitingRoomVideoPlaceholder');
+  const waitingRoomMicToggle = document.getElementById('waitingRoomMicToggle');
+  const waitingRoomCameraToggle = document.getElementById('waitingRoomCameraToggle');
+
+  // Session details
+  const sessionId = {{ session.id }};
+  const currentUserRole = "{{ current_user.role }}";
+  const currentUserId = {{ current_user.id }};
+
+  // Start the call when page loads
+  document.addEventListener('DOMContentLoaded', function() {
+      // Initialize Socket.IO connection
+      initSocketConnection();
+
+      // Initialize tabs
+      initTabs();
+
+      // Start timer
+      startTimer();
+
+      // Setup event listeners
+      setupEventListeners();
+
+      // Initialize waiting room video preview
+      initWaitingRoomVideoPreview();
+  });
+
+  // Initialize waiting room video preview
+  async function initWaitingRoomVideoPreview() {
+      try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: true
+          });
+
+          waitingRoomVideo.srcObject = localStream;
+          waitingRoomVideoPlaceholder.classList.add('hidden');
+      } catch (error) {
+          console.error('Error initializing waiting room video preview:', error);
+          waitingRoomVideoPlaceholder.classList.remove('hidden');
+      }
+  }
+
+  // Initialize Socket.IO connection
+  function initSocketConnection() {
+    // Always create a dedicated connection for video counseling to avoid conflicts with chat
+    console.log('Creating dedicated connection for video counseling');
+
+    if (window.DedicatedConnectionManager) {
+      // Use our dedicated connection manager
+      window.DedicatedConnectionManager.createConnection({
+        feature: 'video_counseling',
+        query: {
+          session_id: sessionId,
+          role: 'student',
+          user_id: currentUserId
+        },
+        debug: true
+      })
+      .then(dedicatedSocket => {
+        // Use the dedicated socket
+        socket = dedicatedSocket;
+        console.log('Using dedicated socket connection for video session');
+
+        if (socket.connected) {
+          console.log('Already connected to signaling server');
+          connectionStatus.textContent = 'Signaling Connected';
+
+          // Join the video call room
+          socket.emit('join_call', {
+            session_id: sessionId
+          });
+
+          // Check waiting room status immediately
+          socket.emit('check_waiting_room_status', {
+            session_id: sessionId
+          });
+        }
+
+        // Setup all socket event listeners for video session
+        setupVideoSessionEventListeners();
+      })
+      .catch(error => {
+        console.error('Failed to create dedicated connection:', error);
+        fallbackToDirectConnection();
+      });
+    } else {
+      console.warn('DedicatedConnectionManager not available, using direct connection');
+      fallbackToDirectConnection();
+    }
+  }
+
+  // Fallback to direct connection if dedicated connection fails
+  function fallbackToDirectConnection() {
+    console.log('Creating direct socket.io connection for video session');
+    socket = io({
+      forceNew: true, // Force a new connection to avoid sharing with other features
+      query: {
+        feature: 'video_counseling',
+        session_id: sessionId,
+        role: 'student',
+        user_id: currentUserId
+      }
+    });
+
+    // Setup all socket event listeners for video session
+    setupVideoSessionEventListeners();
+  }
+
+  // Setup all event listeners for video session
+  function setupVideoSessionEventListeners() {
+    // Socket connection events
+    socket.on('connect', () => {
+      console.log('Connected to signaling server');
+      connectionStatus.textContent = 'Signaling Connected';
+
+      // Join the video call room
+      socket.emit('join_call', {
+        session_id: sessionId
+      });
+
+      // Check waiting room status immediately
+      socket.emit('check_waiting_room_status', {
+        session_id: sessionId
+      });
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+      connectionStatus.textContent = 'Signaling Error';
+      connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
+      connectionIndicator.classList.add('bg-red-500');
+    });
+
+    // Handle waiting room status updates
+    socket.on('waiting_room_status', (data) => {
+      console.log('Waiting room status update:', data);
+      waitingRoomStatus = data.status;
+      updateWaitingRoomUI(data);
+
+      // If call is now in progress, start the call
+      if (data.call_started) {
+        startCall();
+      }
+    });
+
+    // Handle start call event
+    socket.on('start_call', (data) => {
+      console.log('Starting call:', data);
+      waitingRoomStatus = 'call_in_progress';
+      startCall();
+    });
+
+    // Handle user joining
+    socket.on('user_joined', (data) => {
+      console.log('User joined:', data);
+
+      // If we got a waiting status with the join event, update UI
+      if (data.waiting_status) {
+        waitingRoomStatus = data.waiting_status;
+        updateWaitingRoomUI({
+          counselor_waiting: data.role === 'office_admin' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'counselor_waiting',
+          student_waiting: data.role === 'student' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'student_waiting'
+        });
+      }
+    });
+
+    socket.on('user_left', (data) => {
+      console.log('User left:', data);
+
+      // If call is in progress, show notification
+      if (waitingRoomStatus === 'call_in_progress') {
+        // Show notification that the other participant has left
+        alert(`${data.name} has left the session`);
+
+        // Update UI to show disconnected state
+        connectionStatus.textContent = 'Counselor disconnected';
+        connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
+        connectionIndicator.classList.add('bg-red-500');
+
+        // Clear remote video stream
+        if (remoteStream) {
+          remoteStream.getTracks().forEach(track => track.stop());
+        }
+        remoteVideo.srcObject = null;
+      } else {
+        // We're in waiting room, update status
+        socket.emit('check_waiting_room_status', {
+          session_id: sessionId
+        });
+      }
+    });
+
+    // WebRTC signaling events
+    socket.on('video_offer', (data) => {
+      console.log('Received video offer from:', data.sender_name);
+      handleVideoOffer(data);
+    });
+
+    socket.on('video_answer', (data) => {
+      console.log('Received video answer from:', data.sender_name);
+      handleVideoAnswer(data);
+    });
+
+    socket.on('ice_candidate', (data) => {
+      console.log('Received ICE candidate');
+      handleIceCandidate(data);
+    });
+
+    // Handle waiting room messages
+    socket.on('waiting_room_message', (data) => {
+      console.log('Waiting room message:', data);
+      // Display as notification or in waiting room UI
+      const notificationDiv = document.createElement('div');
+      notificationDiv.className = 'p-2 mb-2 bg-blue-50 text-blue-700 rounded-lg transition-opacity duration-300';
+      notificationDiv.textContent = `${data.sender_name}: ${data.message}`;
+      document.body.appendChild(notificationDiv);
+
+      setTimeout(() => {
+        notificationDiv.style.opacity = '0';
+        setTimeout(() => notificationDiv.remove(), 1000);
+      }, 5000);
+    });
+  }
+
+  // Update waiting room UI based on status
+  function updateWaitingRoomUI(data) {
+      // Update indicators
+      counselorIndicator.className = data.counselor_waiting ? 'h-3 w-3 rounded-full bg-green-500' : 'h-3 w-3 rounded-full bg-gray-300';
+      studentIndicator.className = data.student_waiting ? 'h-3 w-3 rounded-full bg-green-500' : 'h-3 w-3 rounded-full bg-gray-300';
+
+      // Update status text
+      statusText.textContent = waitingRoomStatus === 'call_in_progress' ? 'In Call' : 'Waiting';
+
+      // Update waiting room message based on status
+      if (waitingRoomStatus === 'empty') {
+          waitingRoomMessage.textContent = 'Waiting for participants to join...';
+      } else if (waitingRoomStatus === 'counselor_waiting') {
+          waitingRoomMessage.textContent = 'Your counselor is waiting for you...';
+      } else if (waitingRoomStatus === 'student_waiting') {
+          waitingRoomMessage.textContent = 'Waiting for your counselor to join...';
+      } else if (waitingRoomStatus === 'both_waiting') {
+          waitingRoomMessage.textContent = 'Both participants are here! Starting the call...';
+      } else if (waitingRoomStatus === 'call_in_progress') {
+          waitingRoomMessage.textContent = 'Call is in progress.';
+          // Hide waiting room, show call UI
+          waitingRoomUI.classList.add('hidden');
+          callUI.classList.remove('hidden');
+      }
+  }
+
+  // Start the video call
+  async function startCall() {
+      try {
+          // Show call UI, hide waiting room
+          waitingRoomUI.classList.add('hidden');
+          callUI.classList.remove('hidden');
+          statusText.textContent = 'In Call';
+
+          // Check if we already have a stream
+          if (!localStream) {
+              console.log('Requesting media permissions...');
+
+              // First try with both video and audio
+              try {
+                  localStream = await navigator.mediaDevices.getUserMedia({
+                      video: true,
+                      audio: true
+                  });
+                  console.log('Got both video and audio permissions');
+              } catch (err) {
+                  console.warn('Failed to get full permissions, trying video only:', err);
+                  // If that fails, try with just video
+                  try {
+                      localStream = await navigator.mediaDevices.getUserMedia({
+                          video: true,
+                          audio: false
+                      });
+                      console.log('Got video permission only');
+                  } catch (err2) {
+                      console.warn('Failed to get video permission, trying audio only:', err2);
+                      // If that fails too, try with just audio
+                      try {
+                          localStream = await navigator.mediaDevices.getUserMedia({
+                              video: false,
+                              audio: true
+                          });
+                          console.log('Got audio permission only');
+                      } catch (err3) {
+                          // If all else fails, create an empty stream
+                          console.error('Failed to get any media permissions:', err3);
+                          localStream = new MediaStream();
+                          alert('Failed to access camera and microphone. Please check your permissions in browser settings and try again.');
+                      }
+                  }
+              }
+          }
+
+          // Display local video (if we have video tracks)
+          localVideo.srcObject = localStream;
+
+          // Create remote stream if it doesn't exist
+          if (!remoteStream) {
+              remoteStream = new MediaStream();
+          }
+          remoteVideo.srcObject = remoteStream;
+
+          // Set up WebRTC connection
+          setupPeerConnection();
+
+          // If counselor is not in the room yet, student should initiate the offer
+          if (waitingRoomStatus === 'student_waiting') {
+              // We are the first one here, so initiate the offer
+              setTimeout(() => {
+                  createOffer();
+              }, 1000); // Short delay to ensure connection is ready
+          }
+
+      } catch (error) {
+          console.error('Error starting video call:', error);
+          connectionStatus.textContent = 'Media Error: ' + error.message;
+          connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
+          connectionIndicator.classList.add('bg-red-500');
+      }
+  }
+
+  // Create and send an offer
+  async function createOffer() {
+      try {
+          const offer = await peerConnection.createOffer({
+              offerToReceiveAudio: true,
+              offerToReceiveVideo: true
+          });
+
+          await peerConnection.setLocalDescription(offer);
+
+          // Send the offer to the signaling server
+          socket.emit('video_offer', {
+              session_id: sessionId,
+              sdp: peerConnection.localDescription
+          });
+
+          console.log('Offer sent from student');
+      } catch (error) {
+          console.error('Error creating offer:', error);
+          alert('Failed to create connection offer. Please try refreshing the page.');
+      }
+  }
+
+  // Setup WebRTC peer connection
+  function setupPeerConnection() {
+      // Configure ICE servers (STUN and TURN for NAT traversal)
+      const configuration = {
+          iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+      };
+
+      // Create peer connection
+      peerConnection = new RTCPeerConnection(configuration);
+
+      // Add all local tracks to the peer connection
+      localStream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, localStream);
+      });
+
+      // Listen for remote tracks
+      peerConnection.ontrack = (event) => {
+          console.log('Remote track received:', event.track.kind);
+
+          // Clear previous tracks of the same kind to prevent duplicates
+          const trackKind = event.track.kind;
+          remoteStream.getTracks().forEach(track => {
+              if (track.kind === trackKind) {
+                  remoteStream.removeTrack(track);
+              }
+          });
+
+          // Add the new track to the remote stream
+          remoteStream.addTrack(event.track);
+
+          // Ensure video element is properly displaying the stream
+          remoteVideo.srcObject = remoteStream;
+
+          console.log(`Added ${trackKind} track to remote stream`);
+
+          // If this is the first video track, update the UI
+          if (trackKind === 'video') {
+              connectionStatus.textContent = 'Connected - Video Active';
+              connectionIndicator.classList.add('bg-blue-500');
+          }
+      };
+
+      // Handle ICE candidates
+      peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+              // Send the ICE candidate to the signaling server
+              socket.emit('ice_candidate', {
+                  session_id: sessionId,
+                  candidate: event.candidate
+              });
+          }
+      };
+
+      // Monitor connection state
+      peerConnection.oniceconnectionstatechange = () => {
+          console.log('ICE connection state:', peerConnection.iceConnectionState);
+          updateConnectionStatus(peerConnection.iceConnectionState);
+      };
+
+      console.log('WebRTC peer connection created');
+  }
+
+  // Handle incoming video offer
+  async function handleVideoOffer(data) {
+      try {
+          if (!peerConnection) {
+              console.warn('No peer connection when receiving offer, setting up now');
+              setupPeerConnection();
+          }
+
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+
+          // Send the answer to the signaling server
+          socket.emit('video_answer', {
+              session_id: sessionId,
+              sdp: peerConnection.localDescription
+          });
+
+          console.log('Answer sent');
+      } catch (error) {
+          console.error('Error handling video offer:', error);
+          alert('Failed to handle incoming connection. Please try refreshing the page.');
+      }
+  }
+
+  // Handle incoming video answer
+  async function handleVideoAnswer(data) {
+      try {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          console.log('Answer processed and remote description set');
+      } catch (error) {
+          console.error('Error handling video answer:', error);
+      }
+  }
+
+  // Handle incoming ICE candidate
+  async function handleIceCandidate(data) {
+      try {
+          if (peerConnection && data.candidate) {
+              await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+              console.log('Added ICE candidate');
+          }
+      } catch (error) {
+          console.error('Error handling ICE candidate:', error);
+      }
+  }
+
+  // Update connection status UI based on ICE state
+  function updateConnectionStatus(state) {
+      switch(state) {
+          case 'checking':
+              connectionStatus.textContent = 'Connecting...';
+              connectionIndicator.classList.remove('bg-blue-500', 'bg-red-500');
+              connectionIndicator.classList.add('bg-yellow-500');
+              isConnected = false;
+              break;
+
+          case 'connected':
+          case 'completed':
+              connectionStatus.textContent = 'Connected';
+              connectionIndicator.classList.remove('bg-yellow-500', 'bg-red-500');
+              connectionIndicator.classList.add('bg-blue-500');
+              isConnected = true;
+
+              // Start monitoring connection quality
+              startConnectionQualityMonitoring();
+              break;
+
+          case 'disconnected':
+              connectionStatus.textContent = 'Disconnected - Trying to reconnect';
+              connectionIndicator.classList.remove('bg-blue-500', 'bg-red-500');
+              connectionIndicator.classList.add('bg-yellow-500');
+              isConnected = false;
+              break;
+
+          case 'failed':
+              connectionStatus.textContent = 'Connection Failed';
+              connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
+              connectionIndicator.classList.add('bg-red-500');
+              isConnected = false;
+
+              // Try to restart ICE if connection failed
+              if (peerConnection) {
+                  peerConnection.restartIce();
+              }
+              break;
+
+          case 'closed':
+              connectionStatus.textContent = 'Connection Closed';
+              connectionIndicator.classList.remove('bg-blue-500', 'bg-yellow-500');
+              connectionIndicator.classList.add('bg-red-500');
+              isConnected = false;
+              break;
+      }
+  }
+
+  // Monitor connection quality periodically
+  function startConnectionQualityMonitoring() {
+      setInterval(async () => {
+          if (!peerConnection || !isConnected) return;
+
+          try {
+              const stats = await peerConnection.getStats();
+              let videoBitrate = 0;
+              let packetLoss = 0;
+              let jitter = 0;
+
+              stats.forEach(report => {
+                  // Process inbound RTP stats for video
+                  if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                      if (report.bytesReceived && report.timestamp) {
+                          videoBitrate = Math.round((report.bytesReceived * 8) / 1000);
+                      }
+
+                      if (report.packetsLost !== undefined && report.packetsReceived) {
+                          packetLoss = (report.packetsLost / (report.packetsReceived + report.packetsLost) * 100).toFixed(2);
+                      }
+                  }
+
+                  // Process inbound RTP stats for audio
+                  if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+                      if (report.jitter) {
+                          jitter = (report.jitter * 1000).toFixed(2); // Convert to ms
+                      }
+                  }
+              });
+
+              // Update network stats display
+              networkStats.textContent = `Video: ${videoBitrate} Kbps | Loss: ${packetLoss}% | Jitter: ${jitter}ms`;
+          } catch (e) {
+              console.error('Error monitoring connection quality:', e);
+          }
+      }, 2000);
+  }
+
+  // Start session timer
+  function startTimer() {
+      callStartTime = new Date();
+
+      timerInterval = setInterval(() => {
+          const now = new Date();
+          const diff = new Date(now - callStartTime);
+          const hours = diff.getUTCHours().toString().padStart(2, '0');
+          const minutes = diff.getUTCMinutes().toString().padStart(2, '0');
+          const seconds = diff.getUTCSeconds().toString().padStart(2, '0');
+
+          timerEl.textContent = `${hours}:${minutes}:${seconds}`;
+      }, 1000);
+  }
+
+  // Initialize tabs functionality
+  function initTabs() {
+      const tabButtons = document.querySelectorAll('.tab-button');
+      tabButtons.forEach(button => {
+          button.addEventListener('click', () => {
+              const tab = button.getAttribute('data-tab');
+
+              // Remove active class from all tabs and contents
+              document.querySelectorAll('.tab-button').forEach(b => {
+                b.classList.remove('active', 'border-b-2', 'border-blue-700', 'font-medium');
+                b.classList.add('border-b-0');
+              });
+              document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+
+              // Add active class to selected tab and content
+              button.classList.add('active', 'border-b-2', 'border-blue-700', 'font-medium');
+              document.querySelector(`.tab-content[data-tab="${tab}"]`).classList.remove('hidden');
+          });
+      });
+  }
+
+  // Setup all event listeners
+  function setupEventListeners() {
+      // Toggle microphone
+      micToggle.addEventListener('click', () => {
+          micEnabled = !micEnabled;
+          localStream.getAudioTracks().forEach(track => {
+              track.enabled = micEnabled;
+          });
+
+          micToggle.querySelector('i').className = micEnabled ? 'fas fa-microphone text-xl mb-1 text-blue-600' : 'fas fa-microphone-slash text-xl mb-1 text-red-600';
+          micToggle.querySelector('span').textContent = micEnabled ? 'Mute Mic' : 'Unmute Mic';
+      });
+
+      // Toggle camera
+      cameraToggle.addEventListener('click', () => {
+          cameraEnabled = !cameraEnabled;
+          localStream.getVideoTracks().forEach(track => {
+              track.enabled = cameraEnabled;
+          });
+
+          cameraToggle.querySelector('i').className = cameraEnabled ? 'fas fa-video text-xl mb-1 text-blue-600' : 'fas fa-video-slash text-xl mb-1 text-red-600';
+          cameraToggle.querySelector('span').textContent = cameraEnabled ? 'Hide Camera' : 'Show Camera';
+      });
+
+      // Toggle screen sharing
+      screenShareToggle.addEventListener('click', async () => {
+          try {
+              if (screenShareToggle.querySelector('i').className.includes('desktop')) {
+                  // Start screen sharing
+                  const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                  const videoTrack = screenStream.getVideoTracks()[0];
+
+                  // When screen sharing stops from the browser UI
+                  videoTrack.onended = async () => {
+                      await replaceTrackWithCamera();
+                  };
+
+                  // Replace the video track in the peer connection
+                  const senders = peerConnection.getSenders();
+                  const videoSender = senders.find(sender =>
+                      sender.track && sender.track.kind === 'video'
+                  );
+
+                  if (videoSender) {
+                      await videoSender.replaceTrack(videoTrack);
+                  }
+
+                  // Replace the track in the local stream
+                  localStream.getVideoTracks().forEach(track => {
+                      track.stop();
+                  });
+
+                  localStream.getVideoTracks().forEach(track => {
+                      localStream.removeTrack(track);
+                  });
+
+                  localStream.addTrack(videoTrack);
+                  localVideo.srcObject = localStream;
+
+                  screenShareToggle.querySelector('i').className = 'fas fa-user text-xl mb-1 text-blue-600';
+                  screenShareToggle.querySelector('span').textContent = 'Stop Sharing';
+
+              } else {
+                  await replaceTrackWithCamera();
+              }
+          } catch (error) {
+              console.error('Error toggling screen sharing:', error);
+              alert('Failed to share screen');
+          }
+      });
+
+      // Helper function to revert to camera
+      async function replaceTrackWithCamera() {
+          try {
+              const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+              const cameraTrack = cameraStream.getVideoTracks()[0];
+
+              // Replace track in the peer connection
+              const senders = peerConnection.getSenders();
+              const videoSender = senders.find(sender =>
+                  sender.track && sender.track.kind === 'video'
+              );
+
+              if (videoSender) {
+                  await videoSender.replaceTrack(cameraTrack);
+              }
+
+              // Replace track in local stream
+              localStream.getVideoTracks().forEach(track => {
+                  track.stop();
+              });
+
+              localStream.getVideoTracks().forEach(track => {
+                  localStream.removeTrack(track);
+              });
+
+              localStream.addTrack(cameraTrack);
+              localVideo.srcObject = localStream;
+
+              screenShareToggle.querySelector('i').className = 'fas fa-desktop text-xl mb-1 text-blue-600';
+              screenShareToggle.querySelector('span').textContent = 'Share Screen';
+          } catch (error) {
+              console.error('Error reverting to camera:', error);
+          }
+      }
+
+      // Toggle full screen
+      fullScreenToggle.addEventListener('click', () => {
+          const videoContainer = document.getElementById('mainVideoContainer');
+
+          if (!document.fullscreenElement) {
+              if (videoContainer.requestFullscreen) {
+                  videoContainer.requestFullscreen();
+              } else if (videoContainer.webkitRequestFullscreen) {
+                  videoContainer.webkitRequestFullscreen();
+              } else if (videoContainer.msRequestFullscreen) {
+                  videoContainer.msRequestFullscreen();
+              }
+          } else {
+              if (document.exitFullscreen) {
+                  document.exitFullscreen();
+              } else if (document.webkitExitFullscreen) {
+                  document.webkitExitFullscreen();
+              } else if (document.msExitFullscreen) {
+                  document.msExitFullscreen();
+              }
+          }
+      });
+
+      // Video quality change
+      videoQuality.addEventListener('change', () => {
+          const quality = videoQuality.value;
+
+          if (quality === 'audio') {
+              // Turn off video but keep audio
+              localStream.getVideoTracks().forEach(track => {
+                  track.enabled = false;
+              });
+              alert('Video turned off, audio only mode enabled');
+          } else {
+              // Re-enable video and adjust quality constraints
+              localStream.getVideoTracks().forEach(track => {
+                  track.enabled = true;
+
+                  // Get video sender
+                  const sender = peerConnection.getSenders().find(s =>
+                      s.track && s.track.kind === 'video'
+                  );
+
+                  if (sender) {
+                      const params = sender.getParameters();
+                      if (!params.encodings) {
+                          params.encodings = [{}];
+                      }
+
+                      // Adjust encoding parameters based on quality setting
+                      if (quality === 'high') {
+                          params.encodings[0].maxBitrate = 2500000; // 2.5 Mbps
+                      } else if (quality === 'medium') {
+                          params.encodings[0].maxBitrate = 1000000; // 1 Mbps
+                      } else if (quality === 'low') {
+                          params.encodings[0].maxBitrate = 500000; // 500 Kbps
+                      }
+
+                      // Apply the parameters to the sender
+                      sender.setParameters(params)
+                          .then(() => console.log(`Changed video quality to: ${quality}`))
+                          .catch(e => console.error('Failed to set parameters:', e));
+                  }
+              });
+          }
+      });
+
+      // End call button
+      endSessionButton.addEventListener('click', () => {
+          endSessionModal.classList.remove('hidden');
+      });
+
+      // Cancel end session
+      cancelEndSession.addEventListener('click', () => {
+          endSessionModal.classList.add('hidden');
+      });
+
+      // Confirm end session
+      confirmEndSession.addEventListener('click', async () => {
+          try {
+              // Display loading state
+              confirmEndSession.disabled = true;
+              confirmEndSession.textContent = 'Leaving session...';
+
+              // Notify others that we're leaving
+              socket.emit('leave_call', {
+                  session_id: sessionId
+              });
+
+              // Stop streams
+              if (localStream) {
+                  localStream.getTracks().forEach(track => track.stop());
+              }
+
+              // Clear timer
+              clearInterval(timerInterval);
+
+              // Close peer connection
+              if (peerConnection) {
+                  peerConnection.close();
+              }
+
+              // Create temporary notification
+              const notification = document.createElement('div');
+              notification.className = 'fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded shadow-lg';
+              notification.textContent = 'Leaving session... Redirecting';
+              document.body.appendChild(notification);
+
+              // Redirect back to session details after a short delay
+              setTimeout(() => {
+                  window.location.href = "{{ url_for('student.view_session', session_id=session.id) }}";
+              }, 1000);
+
+          } catch (error) {
+              console.error('Error ending session:', error);
+              confirmEndSession.disabled = false;
+              confirmEndSession.textContent = 'Leave Session';
+              alert('Failed to end session properly. Please try refreshing the page.');
+          }
+      });
+
+      // Waiting room mic toggle
+      waitingRoomMicToggle.addEventListener('click', () => {
+          micEnabled = !micEnabled;
+          localStream.getAudioTracks().forEach(track => {
+              track.enabled = micEnabled;
+          });
+
+          waitingRoomMicToggle.querySelector('i').className = micEnabled ? 'fas fa-microphone text-blue-600' : 'fas fa-microphone-slash text-red-600';
+      });
+
+      // Waiting room camera toggle
+      waitingRoomCameraToggle.addEventListener('click', () => {
+          cameraEnabled = !cameraEnabled;
+          localStream.getVideoTracks().forEach(track => {
+              track.enabled = cameraEnabled;
+          });
+
+          waitingRoomCameraToggle.querySelector('i').className = cameraEnabled ? 'fas fa-video text-blue-600' : 'fas fa-video-slash text-red-600';
+      });
+  }
+
+  // Cleanup when leaving the page
+  window.addEventListener('beforeunload', () => {
+      // Notify others that we're leaving
+      if (socket) {
+          socket.emit('leave_call', {
+              session_id: sessionId
+          });
+      }
+
+      // Stop all tracks
+      if (localStream) {
+          localStream.getTracks().forEach(track => track.stop());
+      }
+
+      // Clear timer
+      clearInterval(timerInterval);
+
+      // Close peer connection
+      if (peerConnection) {
+          peerConnection.close();
+      }
+  });
+</script>
+
+<!-- Create a basic stylesheet for video call interface -->
+<style>
+  .video-call-container {
+    height: 100vh;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  video {
+    object-fit: cover;
+  }
+
+  .tab-button.active {
+    color: #1d4ed8;
+    border-bottom: 2px solid #1d4ed8;
+  }
+
+  @keyframes pulse {
+    0% {
+      opacity: 0.6;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.6;
+    }
+  }
+
+  .animate-pulse {
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes fade-in-out {
+    0% {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    10% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    90% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+  }
+
+  .animate-fade-in-out {
+    animation: fade-in-out 3s forwards;
+  }
+</style>
+{% endblock %}

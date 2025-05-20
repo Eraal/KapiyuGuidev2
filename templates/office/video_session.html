@@ -1,0 +1,834 @@
+{% extends "office/office_base.html" %} {% block title %}Video Counseling
+Session - {{ session.id }}{% endblock %} {% block head_extra %}
+<!-- WebRTC and necessary libraries -->
+<script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+<!-- Include counseling socket files -->
+<script src="{{ url_for('static', filename='js/counseling-base.js') }}"></script>
+<script src="{{ url_for('static', filename='js/counseling-sockets.js') }}"></script>
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='css/video-call.css') }}"
+/>
+{% endblock %} {% block content %}
+<div class="bg-white rounded-lg shadow-md mb-6">
+  <div class="flex flex-col h-screen max-h-[calc(100vh-12rem)]">
+    <!-- Header -->
+    <div
+      class="bg-gradient-to-r from-green-700 to-green-800 text-white p-4 flex justify-between items-center rounded-t-lg"
+    >
+      <div class="flex items-center">
+        <a
+          href="{{ url_for('office.video_counseling') }}"
+          class="text-white hover:text-green-200 mr-4 transition duration-150"
+        >
+          <i class="fas fa-arrow-left mr-2"></i> Back to Counseling
+        </a>
+        <h1 class="text-xl font-semibold">
+          Session with {{ student_user.get_full_name() }}
+        </h1>
+        <span
+          class="ml-3 px-3 py-1 bg-green-600 text-xs rounded-full animate-pulse flex items-center"
+          id="statusIndicator"
+        >
+          <i class="fas fa-circle text-xs mr-1"></i>
+          <span id="statusText">Waiting</span>
+        </span>
+      </div>
+      <div class="flex items-center space-x-3">
+        <span
+          id="timer"
+          class="text-white text-lg font-mono px-3 py-1 bg-black bg-opacity-20 rounded-md"
+          >00:00:00</span
+        >
+        <button
+          id="recordButton"
+          class="flex items-center px-3 py-1.5 bg-red-600 rounded-md hover:bg-red-700 transition duration-150 text-sm font-medium"
+        >
+          <i class="fas fa-record-vinyl mr-1.5"></i> Record
+        </button>
+        <button
+          id="endSessionButton"
+          class="flex items-center px-3 py-1.5 bg-red-700 rounded-md hover:bg-red-800 transition duration-150 text-sm font-medium"
+        >
+          <i class="fas fa-phone-slash mr-1.5"></i> End Session
+        </button>
+      </div>
+    </div>
+
+    <!-- Waiting Room -->
+    <div
+      id="waitingRoomUI"
+      class="flex-grow flex items-center justify-center bg-gray-50 p-4"
+    >
+      <div
+        class="max-w-lg w-full bg-white rounded-xl shadow-lg p-8 text-center"
+      >
+        <div class="mb-6">
+          <!-- Video preview in waiting room -->
+          <div
+            class="w-64 h-48 mx-auto bg-gray-800 rounded-lg overflow-hidden mb-4 relative"
+          >
+            <video
+              id="waitingRoomVideo"
+              autoplay
+              playsinline
+              muted
+              class="w-full h-full object-cover"
+            ></video>
+            <div
+              id="waitingRoomVideoPlaceholder"
+              class="absolute inset-0 flex items-center justify-center bg-gray-900"
+            >
+              <i class="fas fa-video-slash text-gray-400 text-4xl"></i>
+            </div>
+          </div>
+
+          <!-- Camera and Mic Controls in waiting room -->
+          <div class="flex justify-center space-x-4 mt-3">
+            <button
+              id="waitingRoomMicToggle"
+              class="p-3 bg-gray-50 rounded-full hover:bg-gray-100 flex items-center justify-center border border-gray-200 transition duration-150"
+              title="Toggle Microphone"
+            >
+              <i class="fas fa-microphone text-green-600"></i>
+            </button>
+            <button
+              id="waitingRoomCameraToggle"
+              class="p-3 bg-gray-50 rounded-full hover:bg-gray-100 flex items-center justify-center border border-gray-200 transition duration-150"
+              title="Toggle Camera"
+            >
+              <i class="fas fa-video text-green-600"></i>
+            </button>
+          </div>
+        </div>
+        <h2 class="text-2xl font-semibold text-gray-800 mb-2">
+          Counseling Session Waiting Room
+        </h2>
+        <p class="text-lg text-gray-600 mb-6" id="waitingRoomMessage">
+          Waiting for student to join...
+        </p>
+        <div class="bg-gray-100 rounded-lg p-4 mb-6">
+          <div class="flex justify-between mb-3">
+            <span class="font-medium">Session details:</span>
+            <span class="text-gray-500">ID: {{ session.id }}</span>
+          </div>
+          <div class="flex justify-between mb-2">
+            <span>Student:</span>
+            <span class="font-medium">{{ student_user.get_full_name() }}</span>
+          </div>
+          <div class="flex justify-between mb-2">
+            <span>Scheduled time:</span>
+            <span class="font-medium"
+              >{{ session.scheduled_at.strftime('%Y-%m-%d %H:%M') }}</span
+            >
+          </div>
+          <div class="flex justify-between">
+            <span>Duration:</span>
+            <span class="font-medium"
+              >{{ session.duration_minutes }} minutes</span
+            >
+          </div>
+        </div>
+        <div class="flex items-center justify-center space-x-4">
+          <div class="flex items-center gap-2">
+            <div
+              class="h-3 w-3 rounded-full bg-green-500"
+              id="counselorIndicator"
+            ></div>
+            <span class="text-sm">Counselor ready</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div
+              class="h-3 w-3 rounded-full bg-gray-300"
+              id="studentIndicator"
+            ></div>
+            <span class="text-sm">Student</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Video Area (hidden until call starts) -->
+    <div id="callUI" class="flex-grow flex hidden">
+      <!-- Video Streams -->
+      <div class="flex-grow flex flex-col md:flex-row relative bg-gray-900">
+        <!-- Main Video Stream (Student) -->
+        <div class="flex-grow relative" id="mainVideoContainer">
+          <video
+            id="remoteVideo"
+            autoplay
+            playsinline
+            class="w-full h-full object-cover"
+          ></video>
+          <div
+            class="absolute top-4 left-4 bg-black bg-opacity-60 px-3 py-1.5 rounded-md text-sm flex items-center"
+          >
+            <i class="fas fa-user mr-2 text-green-400"></i>
+            <span class="text-white">{{ student_user.get_full_name() }}</span>
+          </div>
+        </div>
+
+        <!-- Self Video (Counselor) -->
+        <div
+          class="absolute bottom-4 right-4 w-64 h-48 md:w-1/4 md:h-1/4 bg-gray-800 rounded-lg overflow-hidden shadow-lg border-2 border-green-700"
+          id="selfVideoContainer"
+        >
+          <video
+            id="localVideo"
+            autoplay
+            playsinline
+            muted
+            class="w-full h-full object-cover"
+          ></video>
+          <div
+            class="absolute top-2 right-2 bg-black bg-opacity-60 px-2 py-1 rounded-md text-xs flex items-center"
+          >
+            <span class="text-white"
+              >You ({{ current_user.get_full_name() }})</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <!-- Side Panel -->
+      <div class="w-80 bg-white border-l border-gray-200 flex flex-col">
+        <!-- Tabs -->
+        <div class="flex border-b border-gray-200">
+          <button
+            class="flex-1 py-3 text-center text-gray-600 hover:text-green-700 tab-button active border-b-2 border-green-700 font-medium"
+            data-tab="notes"
+          >
+            <i class="fas fa-sticky-note mr-2"></i> Notes
+          </button>
+          <button
+            class="flex-1 py-3 text-center text-gray-600 hover:text-green-700 tab-button"
+            data-tab="info"
+          >
+            <i class="fas fa-info-circle mr-2"></i> Info
+          </button>
+          <button
+            class="flex-1 py-3 text-center text-gray-600 hover:text-green-700 tab-button"
+            data-tab="controls"
+          >
+            <i class="fas fa-sliders-h mr-2"></i> Controls
+          </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="flex-grow overflow-y-auto">
+          <!-- Notes Tab -->
+          <div class="tab-content active" data-tab="notes">
+            <div class="p-4">
+              <h3 class="text-lg font-semibold text-gray-800 mb-2">
+                Session Notes
+              </h3>
+              <textarea
+                id="sessionNotes"
+                class="w-full h-64 bg-gray-50 text-gray-800 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-green-500 border border-gray-300"
+                placeholder="Take notes during your session..."
+              >
+{{ session.notes or '' }}</textarea
+              >
+              <button
+                id="saveNotes"
+                class="mt-3 w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition duration-150 flex items-center justify-center"
+              >
+                <i class="fas fa-save mr-2"></i> Save Notes
+              </button>
+            </div>
+          </div>
+
+          <!-- Info Tab -->
+          <div class="tab-content hidden" data-tab="info">
+            <div class="p-4">
+              <h3 class="text-lg font-semibold text-gray-800 mb-2">
+                Session Information
+              </h3>
+              <div
+                class="bg-gray-50 rounded-md p-4 space-y-3 border border-gray-200"
+              >
+                <div>
+                  <span class="text-gray-500 block text-sm">Session ID:</span>
+                  <span class="font-medium">{{ session.id }}</span>
+                </div>
+                <div>
+                  <span class="text-gray-500 block text-sm">Student:</span>
+                  <div class="flex items-center">
+                    {% if student_user.profile_pic %}
+                    <img
+                      src="{{ url_for('static', filename='uploads/profiles/' + student_user.profile_pic) }}"
+                      alt="Profile"
+                      class="h-6 w-6 rounded-full mr-2"
+                    />
+                    {% else %}
+                    <div
+                      class="h-6 w-6 rounded-full bg-green-600 flex items-center justify-center mr-2"
+                    >
+                      <span class="text-xs text-white"
+                        >{{ student_user.first_name[0] }}{{
+                        student_user.last_name[0] }}</span
+                      >
+                    </div>
+                    {% endif %}
+                    <span class="font-medium"
+                      >{{ student_user.get_full_name() }}</span
+                    >
+                  </div>
+                </div>
+                <div>
+                  <span class="text-gray-500 block text-sm">Student ID:</span>
+                  <span class="font-medium">{{ student.student_number }}</span>
+                </div>
+                <div>
+                  <span class="text-gray-500 block text-sm"
+                    >Scheduled Time:</span
+                  >
+                  <span class="font-medium"
+                    >{{ session.scheduled_at.strftime('%Y-%m-%d %H:%M') }}</span
+                  >
+                </div>
+                <div>
+                  <span class="text-gray-500 block text-sm">Duration:</span>
+                  <span class="font-medium"
+                    >{{ session.duration_minutes }} minutes</span
+                  >
+                </div>
+              </div>
+
+              {% if session.recording %}
+              <div class="mt-4">
+                <h4 class="text-md font-semibold text-gray-800 mb-2">
+                  Recording
+                </h4>
+                <a
+                  href="{{ url_for('static', filename=session.recording.recording_path) }}"
+                  class="flex items-center p-3 bg-gray-50 rounded-md hover:bg-gray-100 border border-gray-200 transition duration-150"
+                  download
+                >
+                  <i class="fas fa-download mr-2 text-green-600"></i>
+                  <span>Download Recording</span>
+                </a>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Controls Tab -->
+          <div class="tab-content hidden" data-tab="controls">
+            <div class="p-4">
+              <h3 class="text-lg font-semibold text-gray-800 mb-2">
+                Call Controls
+              </h3>
+              <div class="grid grid-cols-2 gap-3">
+                <button
+                  id="micToggle"
+                  class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 flex flex-col items-center justify-center border border-gray-200 transition duration-150"
+                >
+                  <i class="fas fa-microphone text-xl mb-1 text-green-600"></i>
+                  <span class="text-xs">Mute Mic</span>
+                </button>
+                <button
+                  id="cameraToggle"
+                  class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 flex flex-col items-center justify-center border border-gray-200 transition duration-150"
+                >
+                  <i class="fas fa-video text-xl mb-1 text-green-600"></i>
+                  <span class="text-xs">Hide Camera</span>
+                </button>
+                <button
+                  id="screenShareToggle"
+                  class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 flex flex-col items-center justify-center border border-gray-200 transition duration-150"
+                >
+                  <i class="fas fa-desktop text-xl mb-1 text-green-600"></i>
+                  <span class="text-xs">Share Screen</span>
+                </button>
+                <button
+                  id="fullScreenToggle"
+                  class="p-3 bg-gray-50 rounded-md hover:bg-gray-100 flex flex-col items-center justify-center border border-gray-200 transition duration-150"
+                >
+                  <i class="fas fa-expand text-xl mb-1 text-green-600"></i>
+                  <span class="text-xs">Full Screen</span>
+                </button>
+              </div>
+
+              <div class="mt-6">
+                <h4 class="text-md font-semibold text-gray-800 mb-2">
+                  Video Quality
+                </h4>
+                <select
+                  id="videoQuality"
+                  class="w-full bg-gray-50 border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="high">High Quality</option>
+                  <option value="medium" selected>Medium Quality</option>
+                  <option value="low">Low Quality (save bandwidth)</option>
+                  <option value="audio">Audio Only</option>
+                </select>
+              </div>
+
+              <div class="mt-6">
+                <h4 class="text-md font-semibold text-gray-800 mb-2">
+                  Connection Status
+                </h4>
+                <div class="bg-gray-50 rounded-md p-3 border border-gray-200">
+                  <div class="flex items-center mb-2">
+                    <div
+                      class="w-3 h-3 bg-green-500 rounded-full mr-2"
+                      id="connectionIndicator"
+                    ></div>
+                    <span id="connectionStatus" class="font-medium"
+                      >Connected</span
+                    >
+                  </div>
+                  <div class="text-xs text-gray-500">
+                    <span id="networkStats">Network Speed: Calculating...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- End Session Modal -->
+<div
+  id="endSessionModal"
+  class="fixed inset-0 z-50 hidden overflow-y-auto bg-gray-900 bg-opacity-75"
+>
+  <div
+    class="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0"
+  >
+    <span
+      class="hidden sm:inline-block sm:align-middle sm:h-screen"
+      aria-hidden="true"
+      >&#8203;</span
+    >
+    <div
+      class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full"
+    >
+      <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+        <div class="sm:flex sm:items-start">
+          <div
+            class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10"
+          >
+            <i class="fas fa-phone-slash text-red-600"></i>
+          </div>
+          <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+            <h3
+              class="text-lg leading-6 font-medium text-gray-900"
+              id="modal-title"
+            >
+              End Counseling Session
+            </h3>
+            <div class="mt-2">
+              <p class="text-sm text-gray-500">
+                Are you sure you want to end this counseling session? This will
+                complete the session and disconnect the video call.
+              </p>
+
+              <div class="mt-4">
+                <label
+                  for="endSessionNotes"
+                  class="block text-sm font-medium text-gray-700"
+                  >Session Notes</label
+                >
+                <textarea
+                  id="endSessionNotes"
+                  rows="4"
+                  class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm"
+                  placeholder="Add any final notes about this session..."
+                ></textarea>
+              </div>
+
+              {% if session.recording %}
+              <div class="mt-4">
+                <div class="flex items-center">
+                  <input
+                    id="studentConsent"
+                    name="studentConsent"
+                    type="checkbox"
+                    class="h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                  />
+                  <label
+                    for="studentConsent"
+                    class="ml-2 block text-sm text-gray-700"
+                    >Student has given consent to store recording</label
+                  >
+                </div>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+        <button
+          type="button"
+          id="confirmEndSession"
+          class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
+        >
+          End Session
+        </button>
+        <button
+          type="button"
+          id="cancelEndSession"
+          class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  // Global variables
+  let peerConnection;
+  let localStream;
+  let remoteStream;
+  let mediaRecorder;
+  let recordedChunks = [];
+  let isRecording = false;
+  let callStartTime;
+  let timerInterval;
+  let micEnabled = true;
+  let cameraEnabled = true;
+  let socket;
+  let isInitiator = false; // Tracks if this client should initiate the offer
+  let isConnected = false; // Tracks active connection state
+  let waitingRoomStatus = "empty"; // Tracks the waiting room status
+  let pendingIceCandidates = []; // Store ICE candidates until remote description is set
+
+  // DOM elements
+  const localVideo = document.getElementById("localVideo");
+  const remoteVideo = document.getElementById("remoteVideo");
+  const connectionStatus = document.getElementById("connectionStatus");
+  const connectionIndicator = document.getElementById("connectionIndicator");
+  const networkStats = document.getElementById("networkStats");
+  const timer = document.getElementById("timer");
+
+  // Control buttons
+  const micToggle = document.getElementById("micToggle");
+  const videoToggle = document.getElementById("videoToggle");
+  const screenShareButton = document.getElementById('screenShareButton');
+  const recordButton = document.getElementById("recordButton");
+  const endCallButton = document.getElementById("endCallButton");
+  const qualitySettingButton = document.getElementById("qualitySettingButton");
+
+  // Modal elements
+  const endSessionModal = document.getElementById("endSessionModal");
+  const showEndSessionModal = document.getElementById("showEndSessionModal");
+  const closeEndSession = document.getElementById("closeEndSession");
+  const cancelEndSession = document.getElementById("cancelEndSession");
+  const endSessionNotes = document.getElementById("endSessionNotes");
+
+  // Waiting room elements
+  const waitingRoomUI = document.getElementById("waitingRoomUI");
+  const callUI = document.getElementById("callUI");
+  const waitingRoomMessage = document.getElementById("waitingRoomMessage");
+  const counselorIndicator = document.getElementById("counselorIndicator");
+  const studentIndicator = document.getElementById("studentIndicator");
+  const statusText = document.getElementById("statusText");
+  const waitingRoomVideo = document.getElementById("waitingRoomVideo");
+  const waitingRoomVideoPlaceholder = document.getElementById("waitingRoomVideoPlaceholder");
+  const waitingRoomMicToggle = document.getElementById("waitingRoomMicToggle");
+  const waitingRoomCameraToggle = document.getElementById("waitingRoomCameraToggle");
+
+  // Session details
+  const sessionId = {{ session.id }};
+  const meetingId = "{{ meeting_id }}";
+  const currentUserRole = "{{ current_user.role }}";
+  const currentUserId = {{ current_user.id }};
+
+  // Check for media permissions when page loads
+  async function checkMediaPermissions() {
+    // ...existing code...
+  }
+
+  // Initialize Socket.IO connection
+  function initSocketConnection() {
+    // Always create a dedicated connection for video counseling to avoid conflicts with chat
+    console.log('Creating dedicated connection for video counseling');
+
+    if (window.DedicatedConnectionManager) {
+      // Use our dedicated connection manager
+      window.DedicatedConnectionManager.createConnection({
+        feature: 'video_counseling',
+        query: {
+          session_id: sessionId,
+          role: 'office_admin',
+          user_id: currentUserId
+        },
+        debug: true
+      })
+      .then(dedicatedSocket => {
+        // Use the dedicated socket
+        socket = dedicatedSocket;
+        console.log('Using dedicated socket connection for video session');
+
+        if (socket.connected) {
+          console.log('Already connected to signaling server');
+          connectionStatus.textContent = 'Signaling Connected';
+
+          // Join the video call room
+          socket.emit('join_call', {
+            session_id: sessionId
+          });
+
+          // Check waiting room status immediately
+          socket.emit('check_waiting_room_status', {
+            session_id: sessionId
+          });
+        }
+
+        // Setup all socket event listeners for video session
+        setupVideoSessionEventListeners();
+      })
+      .catch(error => {
+        console.error('Failed to create dedicated connection:', error);
+        fallbackToDirectConnection();
+      });
+    } else {
+      console.warn('DedicatedConnectionManager not available, using direct connection');
+      fallbackToDirectConnection();
+    }
+  }
+
+  // Fallback to direct connection if dedicated connection fails
+  function fallbackToDirectConnection() {
+    console.log('Creating direct socket.io connection for video session');
+    socket = io({
+      forceNew: true, // Force a new connection to avoid sharing with other features
+      query: {
+        feature: 'video_counseling',
+        session_id: sessionId,
+        role: 'office_admin',
+        user_id: currentUserId
+      }
+    });
+
+    // Setup all socket event listeners for video session
+    setupVideoSessionEventListeners();
+  }
+
+  // Setup all socket event listeners for video session
+  function setupVideoSessionEventListeners() {
+    // Socket connection events
+    socket.on('connect', () => {
+      console.log('Connected to signaling server');
+      connectionStatus.textContent = 'Signaling Connected';
+
+      // Join the video call room
+      socket.emit('join_call', {
+        session_id: sessionId
+      });
+
+      // Check waiting room status immediately
+      socket.emit('check_waiting_room_status', {
+        session_id: sessionId
+      });
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+      connectionStatus.textContent = 'Signaling Error';
+      connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
+      connectionIndicator.classList.add('bg-red-500');
+    });
+
+    // Handle waiting room status updates
+    socket.on('waiting_room_status', (data) => {
+      console.log('Waiting room status update:', data);
+      waitingRoomStatus = data.status;
+      updateWaitingRoomUI(data);
+
+      // If call is now in progress, start the call
+      if (data.call_started) {
+        startCall();
+      }
+    });
+
+    // Handle start call event
+    socket.on('start_call', (data) => {
+      console.log('Starting call:', data);
+      waitingRoomStatus = 'call_in_progress';
+      startCall();
+    });
+
+    // Handle user joining
+    socket.on('user_joined', (data) => {
+      console.log('User joined:', data);
+
+      // If we got a waiting status with the join event, update UI
+      if (data.waiting_status) {
+        waitingRoomStatus = data.waiting_status;
+        updateWaitingRoomUI({
+          counselor_waiting: data.role === 'office_admin' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'counselor_waiting',
+          student_waiting: data.role === 'student' || waitingRoomStatus === 'both_waiting' || waitingRoomStatus === 'student_waiting'
+        });
+      }
+    });
+
+    socket.on('user_left', (data) => {
+      console.log('User left:', data);
+
+      // If call is in progress, show notification
+      if (waitingRoomStatus === 'call_in_progress') {
+        // Show notification that the other participant has left
+        alert(`${data.name} has left the session`);
+
+        // Update UI to show disconnected state
+        connectionStatus.textContent = 'Other user disconnected';
+        connectionIndicator.classList.remove('bg-green-500', 'bg-yellow-500');
+        connectionIndicator.classList.add('bg-red-500');
+
+        // Clear remote video stream
+        if (remoteStream) {
+          remoteStream.getTracks().forEach(track => track.stop());
+        }
+        remoteVideo.srcObject = null;
+      } else {
+        // We're in waiting room, update status
+        socket.emit('check_waiting_room_status', {
+          session_id: sessionId
+        });
+      }
+    });
+
+    // WebRTC signaling events
+    socket.on('video_offer', (data) => {
+      console.log('Received video offer from:', data.sender_name);
+      handleVideoOffer(data);
+    });
+
+    socket.on('video_answer', (data) => {
+      console.log('Received video answer from:', data.sender_name);
+      handleVideoAnswer(data);
+    });
+
+    socket.on('ice_candidate', (data) => {
+      console.log('Received ICE candidate');
+      handleIceCandidate(data);
+    });
+
+    socket.on('call_status', (data) => {
+      console.log('Call status update:', data);
+      // Update UI based on call status if needed
+    });
+
+    // Handle waiting room messages
+    socket.on('waiting_room_message', (data) => {
+      console.log('Waiting room message:', data);
+      // Display as notification or in waiting room UI
+      const notificationDiv = document.createElement('div');
+      notificationDiv.className = 'bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-4 rounded shadow-md';
+      notificationDiv.innerHTML = `
+        <p class="font-bold">${data.sender_name}:</p>
+        <p>${data.message}</p>
+        <p class="text-xs text-gray-500 mt-1">${new Date(data.timestamp).toLocaleTimeString()}</p>
+      `;
+
+      const waitingRoomNotifications = document.getElementById('waitingRoomNotifications');
+      if (waitingRoomNotifications) {
+        waitingRoomNotifications.appendChild(notificationDiv);
+        waitingRoomNotifications.scrollTop = waitingRoomNotifications.scrollHeight;
+      }
+    });
+  }
+
+  // Update the waiting room UI based on current status
+  function updateWaitingRoomUI(data) {
+    // ...existing code...
+  }
+
+  // Start the video call
+  async function startCall() {
+    // ...existing code...
+  }
+
+  // ...remaining existing functions...
+
+  // Start the call when page loads
+  document.addEventListener('DOMContentLoaded', function() {
+      // Check for media permissions first
+      checkMediaPermissions();
+
+      // Initialize Socket.IO connection
+      initSocketConnection();
+
+      // Initialize tabs
+      initTabs();
+
+      // Start timer
+      startTimer();
+
+      // Setup event listeners
+      setupEventListeners();
+
+      // Initialize waiting room video preview
+      initWaitingRoomVideoPreview();
+  });
+
+  // ...remaining existing code...
+</script>
+
+<!-- Create a basic stylesheet for video call interface -->
+<style>
+  .video-call-container {
+    height: 100vh;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  video {
+    object-fit: cover;
+  }
+
+  .tab-button.active {
+    color: #15803d;
+    border-bottom: 2px solid #15803d;
+  }
+
+  @keyframes pulse {
+    0% {
+      opacity: 0.6;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.6;
+    }
+  }
+
+  .animate-pulse {
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes fade-in-out {
+    0% {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    10% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    90% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+  }
+
+  .animate-fade-in-out {
+    animation: fade-in-out 3s forwards;
+  }
+</style>
+{% endblock %}

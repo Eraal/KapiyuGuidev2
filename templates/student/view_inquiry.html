@@ -1,0 +1,914 @@
+{% extends "student/student_base.html" %} {% block title %}View Inquiry -
+KapiyuGuide{% endblock %} {% block extra_head %}
+<link
+  href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
+  rel="stylesheet"
+/>
+<link
+  rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+/>
+<style>
+  /* Custom scrollbar styling */
+  .message-container::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .message-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .message-container::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.5);
+    border-radius: 20px;
+  }
+
+  /* Message bubble styling */
+  .message-bubble {
+    position: relative;
+    max-width: 80%;
+    border-radius: 18px;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    word-break: break-word;
+  }
+
+  .message-sent {
+    margin-left: auto;
+    background-color: #3b82f6;
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+
+  .message-received {
+    margin-right: auto;
+    background-color: #f3f4f6;
+    color: #1f2937;
+    border-bottom-left-radius: 4px;
+  }
+
+  /* Attachment styling */
+  .attachment-preview {
+    max-width: 180px;
+    max-height: 180px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+  }
+
+  /* Status badges */
+  .inquiry-status-pending {
+    background-color: #fef3c7;
+    color: #92400e;
+  }
+
+  .inquiry-status-in_progress {
+    background-color: #dbeafe;
+    color: #1e40af;
+  }
+
+  .inquiry-status-resolved {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+
+  .inquiry-status-reopened {
+    background-color: #ede9fe;
+    color: #5b21b6;
+  }
+
+  /* Typing indicator dots animation */
+  .typing-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #9ca3af;
+    margin-right: 3px;
+    animation: typing-dot 1.4s infinite ease-in-out;
+  }
+
+  .typing-dot:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes typing-dot {
+    0%,
+    60%,
+    100% {
+      transform: translateY(0);
+    }
+    30% {
+      transform: translateY(-4px);
+    }
+  }
+
+  /* File attachment input styling */
+  .file-input-label {
+    transition: all 0.2s ease;
+  }
+
+  .file-input-label:hover {
+    background-color: #f3f4f6;
+  }
+
+  /* Make chat interface take up full available height */
+  .chat-wrapper {
+    height: calc(100vh - 160px);
+    min-height: 500px;
+  }
+
+  /* Message fading effect */
+  .message-fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .message-bubble {
+      max-width: 90%;
+    }
+
+    .chat-wrapper {
+      height: calc(100vh - 120px);
+    }
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="container mx-auto px-4 py-6" data-inquiry-id="{{ inquiry.id }}">
+  <!-- Breadcrumb Navigation -->
+  <div class="flex items-center text-sm text-gray-600 mb-4">
+    <a href="{{ url_for('student.dashboard') }}" class="hover:text-blue-600"
+      >Dashboard</a
+    >
+    <i class="fas fa-chevron-right mx-2 text-xs"></i>
+    <a href="{{ url_for('student.inquiries') }}" class="hover:text-blue-600"
+      >Inquiries</a
+    >
+    <i class="fas fa-chevron-right mx-2 text-xs"></i>
+    <span class="text-gray-800 font-medium truncate max-w-xs"
+      >{{ inquiry.subject }}</span
+    >
+  </div>
+
+  <!-- Main Content -->
+  <div class="chat-wrapper grid grid-cols-1 lg:grid-cols-4 gap-4">
+    <!-- Left Sidebar - Details & Related Inquiries -->
+    <div class="lg:col-span-1 space-y-4">
+      <!-- Inquiry Details Card -->
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div class="px-4 py-3 bg-gray-50 border-b border-gray-100">
+          <h2 class="text-lg font-semibold text-gray-800">Inquiry Details</h2>
+        </div>
+        <div class="p-4 space-y-3">
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Subject</h3>
+            <p class="text-sm text-gray-900 mt-1">{{ inquiry.subject }}</p>
+          </div>
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Office</h3>
+            <p class="text-sm text-gray-900 mt-1">{{ inquiry.office.name }}</p>
+          </div>
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Status</h3>
+            <span
+              class="px-2 py-1 text-xs rounded-full inquiry-status-{{ inquiry.status }} inline-block mt-1"
+            >
+              {{ inquiry.status|replace('_', ' ')|title }}
+            </span>
+          </div>
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Date Submitted</h3>
+            <p class="text-sm text-gray-900 mt-1">
+              {{ inquiry.created_at.strftime('%B %d, %Y') }}
+            </p>
+          </div>
+
+          <!-- Concern Types -->
+          <div>
+            <h3 class="text-sm font-medium text-gray-500">Concern Types</h3>
+            {% if inquiry.concerns %}
+            <ul class="text-sm text-gray-900 mt-1 space-y-1">
+              {% for concern in inquiry.concerns %}
+              <li>
+                {{ concern.concern_type.name }} {% if
+                concern.other_specification %}
+                <span class="text-gray-500 italic"
+                  >({{ concern.other_specification }})</span
+                >
+                {% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-sm text-gray-500 mt-1">
+              No specific concerns listed
+            </p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Related Inquiries -->
+      {% if related_inquiries %}
+      <div
+        class="bg-white rounded-xl shadow-sm overflow-hidden hidden lg:block"
+      >
+        <div class="px-4 py-3 bg-gray-50 border-b border-gray-100">
+          <h2 class="text-lg font-semibold text-gray-800">Related Inquiries</h2>
+        </div>
+        <div class="p-4">
+          <ul class="space-y-2">
+            {% for related in related_inquiries %}
+            <li>
+              <a
+                href="{{ url_for('student.view_inquiry', inquiry_id=related.id) }}"
+                class="block hover:bg-gray-50 p-3 rounded-md transition"
+              >
+                <p class="text-sm font-medium text-blue-600 truncate">
+                  {{ related.subject }}
+                </p>
+                <div class="flex justify-between items-center mt-1">
+                  <span class="text-xs text-gray-500"
+                    >{{ related.created_at.strftime('%b %d, %Y') }}</span
+                  >
+                  <span
+                    class="inline-block px-2 py-0.5 text-xs rounded-full inquiry-status-{{ related.status }}"
+                  >
+                    {{ related.status|replace('_', ' ')|title }}
+                  </span>
+                </div>
+              </a>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Mobile Only - Toggle Related Inquiries -->
+      {% if related_inquiries %}
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden lg:hidden">
+        <button
+          id="toggleRelatedBtn"
+          class="w-full px-4 py-3 flex justify-between items-center bg-gray-50 border-b border-gray-100"
+        >
+          <h2 class="text-lg font-semibold text-gray-800">Related Inquiries</h2>
+          <i
+            class="fas fa-chevron-down transition-transform"
+            id="toggleRelatedIcon"
+          ></i>
+        </button>
+        <div class="p-4 hidden" id="relatedInquiriesContainer">
+          <ul class="space-y-2">
+            {% for related in related_inquiries %}
+            <li>
+              <a
+                href="{{ url_for('student.view_inquiry', inquiry_id=related.id) }}"
+                class="block hover:bg-gray-50 p-3 rounded-md transition"
+              >
+                <p class="text-sm font-medium text-blue-600 truncate">
+                  {{ related.subject }}
+                </p>
+                <div class="flex justify-between items-center mt-1">
+                  <span class="text-xs text-gray-500"
+                    >{{ related.created_at.strftime('%b %d, %Y') }}</span
+                  >
+                  <span
+                    class="inline-block px-2 py-0.5 text-xs rounded-full inquiry-status-{{ related.status }}"
+                  >
+                    {{ related.status|replace('_', ' ')|title }}
+                  </span>
+                </div>
+              </a>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Right Column - Chat Messages -->
+    <div
+      class="lg:col-span-3 flex flex-col bg-white rounded-xl shadow-sm overflow-hidden"
+    >
+      <!-- Chat Header -->
+      <div
+        class="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between"
+      >
+        <div>
+          <h2 class="text-lg font-semibold text-gray-800">
+            {{ inquiry.subject }}
+          </h2>
+          <p class="text-xs text-gray-500">
+            Conversation with {{ inquiry.office.name }}
+          </p>
+        </div>
+        <a
+          href="{{ url_for('student.inquiries') }}"
+          class="text-blue-600 hover:text-blue-800 text-sm flex items-center"
+        >
+          <i class="fas fa-arrow-left mr-1"></i> Back
+        </a>
+      </div>
+
+      <!-- Messages Container -->
+      <div class="flex-grow overflow-hidden flex flex-col">
+        <!-- Message History -->
+        <div
+          class="message-container flex-grow overflow-y-auto p-4"
+          id="messageHistory"
+        >
+          {% if has_more_messages %}
+          <div id="load-more-container" class="flex justify-center mb-4">
+            <div
+              class="bg-blue-50 text-blue-600 px-3 py-2 rounded-full text-xs font-medium animate-pulse cursor-pointer"
+              id="scroll-indicator"
+            >
+              <i class="fas fa-arrow-up mr-1"></i>
+              Scroll up for older messages
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- Date Separator (optional) -->
+          <div class="flex justify-center my-3">
+            <div
+              class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs"
+            >
+              Today
+            </div>
+          </div>
+
+          <!-- Message Bubbles -->
+          {% for message in messages %}
+          <div
+            class="flex {% if message.sender_id == current_user.id %}justify-end{% endif %} mb-4 message-fade-in"
+          >
+            {% if message.sender_id != current_user.id %}
+            <!-- Avatar for received messages -->
+            <div class="self-end mr-2">
+              <div
+                class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white shadow-sm"
+              >
+                {{ message.sender.first_name[0] }}{{ message.sender.last_name[0]
+                }}
+              </div>
+            </div>
+            {% endif %}
+
+            <div
+              class="message-bubble p-3 {% if message.sender_id == current_user.id %}message-sent{% else %}message-received{% endif %}"
+              data-message-id="{{ message.id }}"
+              data-sender-id="{{ message.sender_id }}"
+            >
+              <!-- Sender info -->
+              <div class="flex items-center mb-1">
+                {% if message.sender_id != current_user.id %}
+                <div>
+                  <span class="text-xs font-semibold">
+                    {{ message.sender.get_full_name() }} {% if
+                    message.sender.role == 'office_admin' %}
+                    <span class="text-blue-600">(Office Staff)</span>
+                    {% endif %}
+                  </span>
+                </div>
+                {% endif %}
+              </div>
+
+              <!-- Message content -->
+              <div class="text-sm">{{ message.content|nl2br }}</div>
+
+              <!-- Message Attachments -->
+              {% if message.attachments %}
+              <div class="mt-2 flex flex-wrap gap-2">
+                {% for attachment in message.attachments %}
+                <a
+                  href="{{ url_for('static', filename=attachment.file_path) }}"
+                  target="_blank"
+                  class="block"
+                >
+                  {% if attachment.file_path.endswith(('.jpg', '.jpeg', '.png',
+                  '.gif')) %}
+                  <img
+                    src="{{ url_for('static', filename=attachment.file_path) }}"
+                    alt="Attachment"
+                    class="attachment-preview"
+                  />
+                  {% else %}
+                  <div
+                    class="bg-white bg-opacity-20 backdrop-filter backdrop-blur-lg px-3 py-2 rounded-md flex items-center"
+                  >
+                    {% if attachment.file_path.endswith('.pdf') %}
+                    <i class="far fa-file-pdf text-red-500 mr-2"></i>
+                    {% elif attachment.file_path.endswith(('.doc', '.docx')) %}
+                    <i class="far fa-file-word text-blue-500 mr-2"></i>
+                    {% else %}
+                    <i class="far fa-file text-gray-500 mr-2"></i>
+                    {% endif %}
+                    <span class="text-xs truncate max-w-xs"
+                      >{{ attachment.filename|default('Attachment') }}</span
+                    >
+                  </div>
+                  {% endif %}
+                </a>
+                {% endfor %}
+              </div>
+              {% endif %}
+
+              <!-- Timestamp and status -->
+              <div class="flex justify-end items-center mt-1 space-x-1">
+                <span class="text-xs opacity-70"
+                  >{{ message.created_at.strftime('%I:%M %p') }}</span
+                >
+
+                {% if message.sender_id == current_user.id %}
+                <span class="status-icon ml-1">
+                  <i
+                    class="fas {% if message.status == 'read' %}fa-check-double text-blue-300{% elif message.status == 'delivered' %}fa-check-double text-white opacity-70{% else %}fa-check text-white opacity-70{% endif %} text-xs"
+                  ></i>
+                </span>
+                {% endif %}
+              </div>
+            </div>
+
+            {% if message.sender_id == current_user.id %}
+            <!-- Avatar for sent messages -->
+            <div class="self-end ml-2">
+              <div
+                class="h-8 w-8 rounded-full bg-green-500 flex items-center justify-center text-white shadow-sm"
+              >
+                {{ current_user.first_name[0] }}{{ current_user.last_name[0] }}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+
+          <!-- Typing indicator -->
+          <div id="typingIndicator" class="flex items-center mb-4 hidden">
+            <div
+              class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white mr-2 shadow-sm"
+            >
+              <i class="fas fa-keyboard"></i>
+            </div>
+            <div class="message-bubble message-received py-2 px-4">
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Message Input Form -->
+        <div class="border-t border-gray-100 p-3 bg-gray-50">
+          <form
+            action="{{ url_for('student.reply_to_inquiry', inquiry_id=inquiry.id) }}"
+            method="post"
+            enctype="multipart/form-data"
+            id="messageForm"
+            class="flex flex-col"
+          >
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+            <!-- Message textarea -->
+            <div class="relative mb-2">
+              <textarea
+                name="message"
+                rows="2"
+                placeholder="Type your message..."
+                id="messageInput"
+                class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              ></textarea>
+            </div>
+
+            <!-- File attachments preview -->
+            <div
+              id="replyAttachmentPreview"
+              class="flex flex-wrap gap-2 mb-2"
+            ></div>
+
+            <!-- Action buttons -->
+            <div class="flex items-center justify-between">
+              <div class="relative">
+                <input
+                  type="file"
+                  id="replyAttachments"
+                  name="attachments"
+                  multiple
+                  class="hidden"
+                />
+                <label
+                  for="replyAttachments"
+                  class="file-input-label flex items-center cursor-pointer text-gray-600 hover:text-blue-600 px-3 py-2 rounded-md"
+                >
+                  <i class="fas fa-paperclip mr-2"></i>
+                  <span class="text-sm">Files</span>
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center"
+                id="sendButton"
+              >
+                <span>Send</span>
+                <i class="fas fa-paper-plane ml-2"></i>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Audio notifications -->
+<audio id="notificationSound" preload="auto">
+  <source
+    src="{{ url_for('static', filename='sounds/notification.mp3') }}"
+    type="audio/mpeg"
+  />
+</audio>
+
+{% endblock %} {% block scripts %}
+<script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/inquiry-chat.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chat-init.js') }}"></script>
+<script src="{{ url_for('static', filename='js/progressive-chat-loader.js') }}"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    // Scroll to bottom of message history on page load
+    const messageHistory = document.getElementById("messageHistory");
+    if (messageHistory) {
+      // Make sure to scroll to bottom after all images are loaded
+      messageHistory.scrollTop = messageHistory.scrollHeight;
+
+      // Add event listener for any images loading to re-scroll once they're done
+      const images = messageHistory.querySelectorAll('img');
+      if (images.length > 0) {
+        images.forEach(img => {
+          img.onload = function() {
+            messageHistory.scrollTop = messageHistory.scrollHeight;
+          };
+        });
+      }
+    }
+
+    // Toggle related inquiries on mobile
+    const toggleRelatedBtn = document.getElementById('toggleRelatedBtn');
+    const relatedInquiriesContainer = document.getElementById('relatedInquiriesContainer');
+    const toggleRelatedIcon = document.getElementById('toggleRelatedIcon');
+
+    if (toggleRelatedBtn && relatedInquiriesContainer && toggleRelatedIcon) {
+      toggleRelatedBtn.addEventListener('click', function() {
+        relatedInquiriesContainer.classList.toggle('hidden');
+        toggleRelatedIcon.classList.toggle('transform');
+        toggleRelatedIcon.classList.toggle('rotate-180');
+      });
+    }
+
+    // Handle file attachments preview for replies
+    const replyAttachments = document.getElementById("replyAttachments");
+    const replyAttachmentPreview = document.getElementById("replyAttachmentPreview");
+
+    if (replyAttachments && replyAttachmentPreview) {
+      replyAttachments.addEventListener("change", function (e) {
+        replyAttachmentPreview.innerHTML = "";
+        const files = Array.from(e.target.files);
+
+        // Limit to 3 files
+        if (files.length > 3) {
+          alert("You can only upload up to 3 files.");
+          e.target.value = "";
+          return;
+        }
+
+        files.forEach((file) => {
+          // Check file size (5MB limit)
+          if (file.size > 5 * 1024 * 1024) {
+            alert(`File ${file.name} is too large. Maximum file size is 5MB.`);
+            return;
+          }
+
+          const preview = document.createElement("div");
+          preview.className = "bg-gray-100 px-3 py-2 rounded-md flex items-center text-sm";
+
+          // Preview Icon
+          const icon = document.createElement("i");
+          if (file.type.match("image.*")) {
+            icon.className = "far fa-image text-blue-500 mr-2";
+          } else if (file.type === "application/pdf") {
+            icon.className = "far fa-file-pdf text-red-500 mr-2";
+          } else if (
+            file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+            file.type === "application/msword"
+          ) {
+            icon.className = "far fa-file-word text-blue-500 mr-2";
+          } else {
+            icon.className = "far fa-file text-gray-500 mr-2";
+          }
+          preview.appendChild(icon);
+
+          const fileName = document.createElement("span");
+          fileName.className = "text-xs";
+          fileName.textContent =
+            file.name.length > 15
+              ? file.name.substring(0, 15) + "..."
+              : file.name;
+          preview.appendChild(fileName);
+
+          const removeBtn = document.createElement("button");
+          removeBtn.className = "ml-2 text-red-500 hover:text-red-700";
+          removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+          removeBtn.addEventListener("click", function (e) {
+            e.preventDefault();
+            preview.remove();
+            // Note: This doesn't actually remove the file from the input
+            // You would need a more complex solution to truly remove files
+          });
+          preview.appendChild(removeBtn);
+
+          replyAttachmentPreview.appendChild(preview);
+        });
+      });
+    }
+
+    // Auto-resize textarea
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+      messageInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+        // Limit to a max height
+        if (this.scrollHeight > 150) {
+          this.style.height = '150px';
+          this.style.overflowY = 'auto';
+        } else {
+          this.style.overflowY = 'hidden';
+        }
+      });
+    }
+
+    // Initialize the chat manager for real-time features
+    if (window.io) {
+      const socket = io();
+
+      // Initialize the inquiry chat
+      const inquiryChat = new InquiryChat({
+        socket: socket,
+        messageInput: document.getElementById('messageInput'),
+        sendButton: document.getElementById('sendButton'),
+        messageContainer: document.getElementById('messageHistory'),
+        typingIndicator: document.getElementById('typingIndicator'),
+        inquiryId: {{ inquiry.id }},
+        currentUserId: {{ current_user.id }},
+        currentUserRole: '{{ current_user.role }}',
+        currentUserName: '{{ current_user.get_full_name() }}',
+        currentUserInitials: '{{ current_user.first_name[0] }}{{ current_user.last_name[0] }}'
+      });
+
+      // Handle message form submission
+      const messageForm = document.getElementById('messageForm');
+      if (messageForm) {
+        messageForm.addEventListener('submit', function(e) {
+          e.preventDefault(); // Prevent default form submission
+
+          const messageInput = document.getElementById('messageInput');
+          const content = messageInput.value.trim();
+
+          if (!content) return; // Don't submit empty messages
+
+          // Create FormData object for sending files
+          const formData = new FormData(this);
+
+          // Generate a temporary message ID
+          const tempMessageId = 'temp-' + Date.now();
+
+          // Create and display the temporary message immediately
+          const tempMessage = {
+            id: tempMessageId,
+            content: content,
+            sender_id: {{ current_user.id }},
+            sender_name: '{{ current_user.get_full_name() }}',
+            timestamp: new Date(),
+            status: 'sent'
+          };
+
+          // Add the temporary message to the UI
+          inquiryChat.appendMessage(tempMessage);
+
+          // Clear the input field
+          messageInput.value = '';
+          messageInput.style.height = 'auto';
+
+          // Clear attachment previews
+          const previewContainer = document.getElementById('replyAttachmentPreview');
+          if (previewContainer) {
+            previewContainer.innerHTML = '';
+          }
+
+          // Reset file input
+          const fileInput = document.getElementById('replyAttachments');
+          if (fileInput) {
+            fileInput.value = '';
+          }
+
+          // Submit the form via AJAX
+          fetch('{{ url_for('student.reply_to_inquiry', inquiry_id=inquiry.id) }}', {
+            method: 'POST',
+            body: formData,
+            credentials: 'same-origin'
+          })
+          .then(response => {
+            if (!response.ok) {
+              throw new Error('Failed to send message');
+            }
+            return response.json().catch(() => ({})); // Handle case when response is not JSON
+          })
+          .then(data => {
+            console.log('Message sent successfully');
+            // The WebSocket system will handle the real-time update
+          })
+          .catch(error => {
+            console.error('Error sending message:', error);
+            // Optionally show an error message to the user
+          });
+        });
+      }
+
+      // Initialize progressive message loading
+      if ({{ has_more_messages|default('false')|tojson }}) {
+        // Function to render a message element - carefully preserved from original code but styled to match new design
+        const renderMessage = (message) => {
+          const isSentByMe = message.sender_id == {{ current_user.id }};
+          const messageElement = document.createElement('div');
+          messageElement.className = `flex ${isSentByMe ? 'justify-end' : ''} mb-4 message-fade-in`;
+
+          // Format date nicely
+          let formattedDate = 'Unknown date';
+          let timeOnly = 'Unknown time';
+          if (message.timestamp) {
+            const date = new Date(message.timestamp);
+            formattedDate = date.toLocaleString('default', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: 'numeric',
+              hour12: true
+            });
+            timeOnly = date.toLocaleString('default', {
+              hour: 'numeric',
+              minute: 'numeric',
+              hour12: true
+            });
+          }
+
+          // Get sender name or initials
+          let senderInitials = 'UN';
+          if (message.sender_name) {
+            const nameParts = message.sender_name.split(' ');
+            if (nameParts.length > 1) {
+              senderInitials = nameParts[0].charAt(0) + nameParts[nameParts.length - 1].charAt(0);
+            } else {
+              senderInitials = message.sender_name.substring(0, 2);
+            }
+          }
+
+          // Create HTML structure matching our new design
+          let html = '';
+
+          // Avatar for received messages
+          if (!isSentByMe) {
+            html += `
+              <div class="self-end mr-2">
+                <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white shadow-sm">
+                  ${senderInitials}
+                </div>
+              </div>
+            `;
+          }
+
+          // Message bubble
+          html += `
+            <div class="message-bubble p-3 ${isSentByMe ? 'message-sent' : 'message-received'}"
+                 data-message-id="${message.id}"
+                 data-sender-id="${message.sender_id}">
+
+              <!-- Sender info -->
+              <div class="flex items-center mb-1">
+                ${!isSentByMe ? `
+                <div>
+                  <span class="text-xs font-semibold">
+                    ${message.sender_name}
+                    ${message.is_staff ? '<span class="text-blue-600">(Office Staff)</span>' : ''}
+                  </span>
+                </div>
+                ` : ''}
+              </div>
+
+              <!-- Message content -->
+              <div class="text-sm">${message.content.replace(/\n/g, '<br>')}</div>
+
+              <!-- Message Attachments -->
+              ${message.attachments ? `
+              <div class="mt-2 flex flex-wrap gap-2">
+                ${message.attachments.map(attachment => `
+                  <a href="${attachment.file_path}" target="_blank" class="block">
+                    ${attachment.file_path.endsWith('.jpg') || attachment.file_path.endsWith('.jpeg') ||
+                      attachment.file_path.endsWith('.png') || attachment.file_path.endsWith('.gif') ?
+                      `<img src="${attachment.file_path}" alt="Attachment" class="attachment-preview" />` :
+                      `<div class="bg-white bg-opacity-20 backdrop-filter backdrop-blur-lg px-3 py-2 rounded-md flex items-center">
+                        ${attachment.file_path.endsWith('.pdf') ?
+                          '<i class="far fa-file-pdf text-red-500 mr-2"></i>' :
+                          attachment.file_path.endsWith('.doc') || attachment.file_path.endsWith('.docx') ?
+                          '<i class="far fa-file-word text-blue-500 mr-2"></i>' :
+                          '<i class="far fa-file text-gray-500 mr-2"></i>'}
+                        <span class="text-xs truncate max-w-xs">${attachment.filename || 'Attachment'}</span>
+                      </div>`
+                    }
+                  </a>
+                `).join('')}
+              </div>
+              ` : ''}
+
+              <!-- Timestamp and status -->
+              <div class="flex justify-end items-center mt-1 space-x-1">
+                <span class="text-xs opacity-70">${timeOnly}</span>
+                ${isSentByMe ? `
+                <span class="status-icon ml-1">
+                  <i class="fas ${message.status === 'read' ? 'fa-check-double text-blue-300' :
+                               message.status === 'delivered' ? 'fa-check-double text-white opacity-70' :
+                               'fa-check text-white opacity-70'} text-xs"></i>
+                </span>
+                ` : ''}
+              </div>
+            </div>
+          `;
+
+          // Avatar for sent messages
+          if (isSentByMe) {
+            html += `
+              <div class="self-end ml-2">
+                <div class="h-8 w-8 rounded-full bg-green-500 flex items-center justify-center text-white shadow-sm">
+                  {{ current_user.first_name[0] }}{{ current_user.last_name[0] }}
+                </div>
+              </div>
+            `;
+          }
+
+          messageElement.innerHTML = html;
+          return messageElement;
+        };
+
+        // Create a progressive chat loader
+        const progressiveChatLoader = new ProgressiveChatLoader({
+          messageContainer: messageHistory,
+          inquiryId: {{ inquiry.id }},
+          renderMessage: renderMessage,
+          apiEndpoint: "{{ url_for('student.get_older_messages', inquiry_id=inquiry.id) }}",
+          loadThreshold: 100, // Load more when within 100px of top
+          batchSize: 6,
+        });
+
+        // Add scroll event to automatically load older messages
+        if (messageHistory) {
+          messageHistory.addEventListener('scroll', function() {
+            // Check if user has scrolled near the top
+            if (messageHistory.scrollTop < progressiveChatLoader.loadThreshold) {
+              progressiveChatLoader.loadOlderMessages();
+            }
+          });
+
+          // Check if we have a scroll indicator element
+          const scrollIndicator = document.getElementById('scroll-indicator');
+          if (scrollIndicator) {
+            scrollIndicator.addEventListener('click', function() {
+              progressiveChatLoader.loadOlderMessages();
+            });
+          }
+        }
+      }
+    }
+  });
+</script>
+{% endblock %}
